@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import { printPdf, printScaleForAreas, PRINT_DIALOG_TIMEOUT_MS } from '../src/renderer/print'
+import { printPdf, printScaleForAreas, PRINT_DIALOG_TIMEOUT_MS } from '@genoffice/pdf-print'
 
 function fakeDoc(numPages: number, render = vi.fn(() => ({ promise: Promise.resolve() }))) {
   const getPage = vi.fn(async () => ({

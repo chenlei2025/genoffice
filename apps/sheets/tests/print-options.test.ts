@@ -48,6 +48,7 @@ const CHOICE = {
   pageSize: 'Letter' as const,
   margins: { top: 1, bottom: 1, left: 0.5, right: 0.5 },
   scale: 1,
+  fitMode: 'sheet' as const,
   horizontalCentered: true,
   verticalCentered: false,
   pages: { from: 2, to: 4 },
@@ -80,6 +81,7 @@ describe('previewLayoutCss', () => {
       pageSize: 'A4',
       margins: { top: 0.75, bottom: 0.75, left: 0.7, right: 0.7 },
       scale: 0.8,
+      fitMode: 'sheet',
       horizontalCentered: true,
       verticalCentered: true,
     })
@@ -95,6 +97,10 @@ describe('previewLayoutCss', () => {
     expect(css).toContain('align-items: var(--align-x)')
     expect(css).toContain('justify-content: var(--align-y)')
     expect(css).toContain('zoom: var(--print-scale)')
+    expect(css).toContain('background: #2c2c2e')
+    expect(css).toContain('#preview-page-label')
+    expect(css).toContain('#preview-scroll')
+    expect(css).toContain('.page-clip')
     expect(css).toContain('flex: none')
     expect(css).toContain('@media screen')
     expect(css).toContain('@media print')
@@ -109,6 +115,7 @@ describe('previewLayoutCss', () => {
         pageSize: 'A4',
         margins: { top: 1, bottom: 0.5, left: 0.25, right: 0 },
         scale: 1,
+        fitMode: 'scale',
         horizontalCentered: false,
         verticalCentered: false,
       }),
@@ -120,6 +127,7 @@ describe('previewLayoutCss', () => {
       bottom: 0.5,
       left: 0.25,
       scale: 1,
+      fitMode: 'scale',
       align: 'flex-start',
       justify: 'flex-start',
     })

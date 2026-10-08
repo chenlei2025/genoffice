@@ -8,13 +8,16 @@ export type PreviewPageSize =
   | (typeof PREVIEW_PAGE_SIZES)[number]
   | { width: number; height: number }
 
+export type PreviewFitMode = 'scale' | 'sheet' | 'width'
+
 export interface PreviewLayout {
   landscape: boolean
   pageSize: PreviewPageSize
   margins: { top: number; bottom: number; left: number; right: number }
-  /// 0.1–2; screen preview zooms `.sheet` by this so it matches Chromium's
-  /// print/printToPDF scale. Print media resets it to 1 (the engine scales).
+  /// 0.1–2 when fitMode is `scale`.
   scale: number
+  /// `sheet` / `width` shrink into the printable area like WPS “调整为”.
+  fitMode: PreviewFitMode
   horizontalCentered: boolean
   verticalCentered: boolean
 }
@@ -41,6 +44,7 @@ export interface PreviewLayoutPatch {
   bottom: number
   left: number
   scale: number
+  fitMode: PreviewFitMode
   align: 'center' | 'flex-start'
   justify: 'center' | 'flex-start'
 }
@@ -60,6 +64,7 @@ export function previewLayoutPatch(layout: PreviewLayout): PreviewLayoutPatch {
     bottom: round3(layout.margins.bottom),
     left: round3(layout.margins.left),
     scale: round3(Math.min(2, Math.max(0.1, layout.scale))),
+    fitMode: layout.fitMode,
     align: layout.horizontalCentered ? 'center' : 'flex-start',
     justify: layout.verticalCentered ? 'center' : 'flex-start',
   }
@@ -85,22 +90,44 @@ export function previewLayoutCss(layout: PreviewLayout): string {
 }
 .sheet { position: relative; width: max-content; flex: none; }
 @media screen {
-  html, body { margin: 0; height: 100%; background: #e4e4e4; }
+  /* macOS print-dialog mat: dark chrome around a white page card. */
+  html, body { margin: 0; height: 100%; background: #2c2c2e; color: #f5f5f7; }
   #preview-fit {
     height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    box-sizing: border-box;
+  }
+  #preview-scroll {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    padding: 16px 16px 8px;
+    box-sizing: border-box;
   }
-  #preview-pages { display: flex; flex-direction: column; gap: 16px; }
+  #preview-pages { display: flex; flex-direction: column; gap: 16px; align-items: center; }
+  #preview-page-label {
+    flex: none;
+    text-align: center;
+    padding: 8px 16px 12px;
+    font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    opacity: 0.85;
+    user-select: none;
+  }
   .area {
+    position: relative;
     box-sizing: border-box;
     background: #fff;
+    color: #000;
     width: calc(var(--page-w) * 1in);
     height: calc(var(--page-h) * 1in);
     padding: calc(var(--m-top) * 1in) calc(var(--m-right) * 1in) calc(var(--m-bottom) * 1in) calc(var(--m-left) * 1in);
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
     display: flex;
     flex: none;
     flex-direction: column;
@@ -108,18 +135,32 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     align-items: var(--align-x);
     overflow: hidden;
   }
-  /* Same factor Chromium applies via scale / scaleFactor on the real job. */
+  .page-clip {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+  }
+  /* Base print scale; __fitSheets further shrinks so the sheet fits the page. */
   .sheet { zoom: var(--print-scale); }
 }
 @media print {
-  html, body, #preview-fit, #preview-pages {
+  html, body, #preview-fit, #preview-scroll, #preview-pages {
     background: transparent !important;
+    color: inherit !important;
     height: auto !important;
     display: block !important;
     overflow: visible !important;
     zoom: 1 !important;
   }
-  .sheet { zoom: 1 !important; }
+  #preview-page-label { display: none !important; }
+  .page-clip {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  .sheet { zoom: 1 !important; position: static !important; top: auto !important; }
   .area {
     background: transparent !important;
     width: auto !important;

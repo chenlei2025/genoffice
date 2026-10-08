@@ -28,7 +28,16 @@ import type { WorkbookPrintResult } from '../shared/desktop-api'
 import type { PreviewLayout } from '../shared/preview-layout'
 import type { PrintDialogChoice, PrintDialogDefaults } from './print-options'
 
-const SIDEBAR_PX = 300
+const SIDEBAR_PX = 340
+
+const PAPER_DIMS_MM: Record<(typeof NAMED_PAGE_SIZES)[number], { w: number; h: number }> = {
+  A3: { w: 297, h: 420 },
+  A4: { w: 210, h: 297 },
+  A5: { w: 148, h: 210 },
+  Letter: { w: 216, h: 279 },
+  Legal: { w: 216, h: 356 },
+  Tabloid: { w: 279, h: 432 },
+}
 
 interface ListedPrinter {
   name: string
@@ -39,6 +48,7 @@ type DialogLabelKey =
   | 'appPrintDialogTitle'
   | 'appPrintPrinter'
   | 'appPrintSaveAsPdf'
+  | 'appPrintPdf'
   | 'appPrintCopies'
   | 'appPrintNow'
   | 'appPrintNoPrinter'
@@ -47,10 +57,19 @@ type DialogLabelKey =
   | 'appCancel'
   | 'appPrintProperties'
   | 'appPrintPages'
+  | 'appPrintPageOf'
   | 'appPrintAllPages'
   | 'appPrintPageFrom'
   | 'appPrintPageTo'
   | 'appPrintScale'
+  | 'appPrintScaleRatio'
+  | 'appPrintAdjustTo'
+  | 'appPrintFitSheetOnePage'
+  | 'appPrintFitColumnsOnePage'
+  | 'appPrintSheetSection'
+  | 'appPrintContent'
+  | 'appPrintActiveSheet'
+  | 'appPrintNormalSize'
   | 'appPrintColorMode'
   | 'appPrintColor'
   | 'appPrintGrayscale'
@@ -64,6 +83,7 @@ type DialogLabelKey =
   | 'appPrintMarginLeft'
   | 'appPrintMarginRight'
   | 'appPrintCustomPaper'
+  | 'appPrintMm'
   | 'appOrientationLabel'
   | 'appPortrait'
   | 'appLandscape'
@@ -72,6 +92,8 @@ type DialogLabelKey =
   | 'appPrintAlign'
   | 'appPrintCenterHorizontal'
   | 'appPrintCenterVertical'
+  | 'appPrintCenterHorizontalShort'
+  | 'appPrintCenterVerticalShort'
   | 'appWidth'
   | 'appHeight'
 
@@ -100,10 +122,12 @@ function escapeHtml(value: string): string {
 
 function paperOptions(defaults: PrintDialogDefaults): string {
   const custom = typeof defaults.pageSize !== 'string'
-  const named = NAMED_PAGE_SIZES.map(
-    (name) =>
-      `<option value="${name}"${defaults.pageSize === name ? ' selected' : ''}>${name}</option>`,
-  ).join('')
+  const unit = label('appPrintMm')
+  const named = NAMED_PAGE_SIZES.map((name) => {
+    const { w, h } = PAPER_DIMS_MM[name]
+    const text = `${name} ${w} × ${h} ${unit}`
+    return `<option value="${name}"${defaults.pageSize === name ? ' selected' : ''}>${escapeHtml(text)}</option>`
+  }).join('')
   const customOption = `<option value="custom"${custom ? ' selected' : ''}>${escapeHtml(label('appPrintCustomPaper'))}</option>`
   return named + customOption
 }
@@ -114,6 +138,8 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
   const custom = typeof defaults.pageSize === 'object' ? defaults.pageSize : { width: 8.5, height: 11 }
   const scalePercent = Math.round(defaults.scale * 100)
   const inch = (value: number) => String(Math.round(value * 100) / 100)
+  const fitMode = defaults.fitMode
+  const scaleMode = fitMode === 'scale'
   return `<!doctype html>
 <html>
 <head>
@@ -139,26 +165,103 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 16px;
+    gap: 12px;
+    padding: 14px 16px 16px;
   }
-  h2 { margin: 4px 0 0; font-size: 12px; font-weight: 600; }
-  label { display: flex; flex-direction: column; gap: 4px; }
-  label.check { flex-direction: row; align-items: center; gap: 8px; }
-  select, input { font: inherit; padding: 6px 8px; }
+  h2 {
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  h2:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  label.field { display: flex; flex-direction: column; gap: 4px; }
+  label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  select, input[type="number"], input[type="text"] {
+    font: inherit;
+    padding: 5px 8px;
+    border-radius: 5px;
+    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+    background: Field;
+    color: FieldText;
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .row > span { flex: none; }
+  .row > select, .row > input { flex: 1; min-width: 0; }
   .pair, .margins { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .hint { margin: 0; opacity: 0.8; }
+  .hint { margin: 0; opacity: 0.75; font-size: 12px; }
+  .pages { display: flex; flex-direction: column; gap: 6px; }
+  .pages .check input[type="number"] { width: 3.2em; padding: 3px 4px; }
+  .orient {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .orient label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 6px;
+    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .orient label:has(input:checked) {
+    border-color: AccentColor;
+    background: color-mix(in srgb, AccentColor 16%, transparent);
+  }
+  .orient input { position: absolute; opacity: 0; pointer-events: none; }
+  .orient svg { display: block; }
+  .center-row { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+  .scale-row { display: flex; flex-direction: column; gap: 8px; }
+  .scale-row .check { flex-wrap: wrap; }
+  .scale-row .check input[type="number"] { width: 4.2em; }
+  .scale-row .check select { flex: 1; min-width: 0; }
+  .toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .toggle input {
+    appearance: none;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: color-mix(in srgb, CanvasText 28%, transparent);
+    position: relative;
+    cursor: pointer;
+    border: 0;
+    flex: none;
+  }
+  .toggle input::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: Canvas;
+    transition: left 0.12s ease;
+  }
+  .toggle input:checked { background: AccentColor; }
+  .toggle input:checked::after { left: 20px; }
   .actions {
     flex: none;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
     padding: 12px 16px;
     border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
     background: Canvas;
   }
-  button { font: inherit; padding: 6px 14px; }
+  .actions-end { display: flex; gap: 8px; margin-left: auto; }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; }
   button.primary { background: AccentColor; color: AccentColorText; border: 0; }
   button:disabled { opacity: 0.5; }
 </style>
@@ -166,100 +269,139 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
 <body>
 <aside>
 <div class="fields">
-  <label>${escapeHtml(label('appPrintPrinter'))}
-    <select id="printer"></select>
+  <label class="field">${escapeHtml(label('appPrintPrinter'))}
+    <select id="printer"${none ? ' disabled' : ''}></select>
   </label>
-  <div class="pair" id="printer-copies">
-    <label>${escapeHtml(label('appPrintCopies'))}
-      <input id="copies" type="number" min="1" max="99" value="1">
+  <div class="row">
+    <span>${escapeHtml(label('appPrintCopies'))}</span>
+    <input id="copies" type="number" min="1" max="99" value="1" style="max-width:5em">
+  </div>
+  <div class="pages">
+    <div>${escapeHtml(label('appPrintPages'))}</div>
+    <label class="check">
+      <input type="radio" name="pages" id="pages-all" value="all" checked>
+      ${escapeHtml(label('appPrintAllPages'))}
     </label>
-    <label class="check" style="align-self: end; padding-bottom: 6px;">
-      <input id="collate" type="checkbox" checked>
-      ${escapeHtml(label('appPrintCollate'))}
+    <label class="check">
+      <input type="radio" name="pages" id="pages-range" value="range">
+      ${escapeHtml(label('appPrintPageFrom'))}
+      <input id="page-from" type="number" min="1" max="9999" value="1" disabled>
+      ${escapeHtml(label('appPrintPageTo'))}
+      <input id="page-to" type="number" min="1" max="9999" value="1" disabled>
     </label>
   </div>
-  <label>${escapeHtml(label('appPrintPages'))}
-    <select id="pages">
-      <option value="all">${escapeHtml(label('appPrintAllPages'))}</option>
-      <option value="range">${escapeHtml(label('appPrintPageFrom'))}–${escapeHtml(label('appPrintPageTo'))}</option>
-    </select>
+  <label class="toggle">
+    <span>${escapeHtml(label('appPrintColorMode'))}</span>
+    <input id="color" type="checkbox">
   </label>
-  <div class="pair" id="range" hidden>
-    <label>${escapeHtml(label('appPrintPageFrom'))}
-      <input id="page-from" type="number" min="1" max="9999" value="1">
-    </label>
-    <label>${escapeHtml(label('appPrintPageTo'))}
-      <input id="page-to" type="number" min="1" max="9999" value="1">
-    </label>
-  </div>
-  <h2>${escapeHtml(label('appPrintProperties'))}</h2>
-  <label>${escapeHtml(label('appSizeLabel'))}
+  <label class="field">${escapeHtml(label('appSizeLabel'))}
     <select id="paper">${paperOptions(defaults)}</select>
   </label>
   <div class="pair" id="custom-paper"${typeof defaults.pageSize === 'string' ? ' hidden' : ''}>
-    <label>${escapeHtml(label('appWidth'))}
+    <label class="field">${escapeHtml(label('appWidth'))}
       <input id="paper-width" type="number" min="1" max="100" step="0.01" value="${custom.width}">
     </label>
-    <label>${escapeHtml(label('appHeight'))}
+    <label class="field">${escapeHtml(label('appHeight'))}
       <input id="paper-height" type="number" min="1" max="100" step="0.01" value="${custom.height}">
     </label>
   </div>
-  <label>${escapeHtml(label('appOrientationLabel'))}
-    <select id="orientation">
-      <option value="portrait"${defaults.landscape ? '' : ' selected'}>${escapeHtml(label('appPortrait'))}</option>
-      <option value="landscape"${defaults.landscape ? ' selected' : ''}>${escapeHtml(label('appLandscape'))}</option>
+  <div>
+    <div style="margin-bottom:6px">${escapeHtml(label('appOrientationLabel'))}</div>
+    <div class="orient">
+      <label>
+        <input type="radio" name="orientation" id="orient-portrait" value="portrait"${defaults.landscape ? '' : ' checked'}>
+        <svg width="28" height="36" viewBox="0 0 28 36" aria-hidden="true">
+          <rect x="4" y="2" width="20" height="32" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <line x1="8" y1="10" x2="20" y2="10" stroke="currentColor" stroke-width="1"/>
+          <line x1="8" y1="14" x2="20" y2="14" stroke="currentColor" stroke-width="1"/>
+          <line x1="8" y1="18" x2="16" y2="18" stroke="currentColor" stroke-width="1"/>
+        </svg>
+        <span>${escapeHtml(label('appPortrait'))}</span>
+      </label>
+      <label>
+        <input type="radio" name="orientation" id="orient-landscape" value="landscape"${defaults.landscape ? ' checked' : ''}>
+        <svg width="36" height="28" viewBox="0 0 36 28" aria-hidden="true">
+          <rect x="2" y="4" width="32" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <line x1="8" y1="10" x2="28" y2="10" stroke="currentColor" stroke-width="1"/>
+          <line x1="8" y1="14" x2="28" y2="14" stroke="currentColor" stroke-width="1"/>
+          <line x1="8" y1="18" x2="20" y2="18" stroke="currentColor" stroke-width="1"/>
+        </svg>
+        <span>${escapeHtml(label('appLandscape'))}</span>
+      </label>
+    </div>
+  </div>
+
+  <h2>${escapeHtml(label('appPrintSheetSection'))}</h2>
+  <label class="field">${escapeHtml(label('appPrintContent'))}
+    <select id="print-content" disabled>
+      <option selected>${escapeHtml(label('appPrintActiveSheet'))}</option>
     </select>
   </label>
-  <label>${escapeHtml(label('appPrintScale'))}
-    <input id="scale" type="number" min="10" max="200" step="1" value="${scalePercent}">
-  </label>
   <div>
-    <div>${escapeHtml(label('appPrintMarginsInches'))}</div>
+    <div style="margin-bottom:6px">${escapeHtml(label('appPrintAlign'))}</div>
+    <div class="center-row">
+      <label class="check">
+        <input id="center-h" type="checkbox"${defaults.horizontalCentered ? ' checked' : ''}>
+        ${escapeHtml(label('appPrintCenterHorizontalShort'))}
+      </label>
+      <label class="check">
+        <input id="center-v" type="checkbox"${defaults.verticalCentered ? ' checked' : ''}>
+        ${escapeHtml(label('appPrintCenterVerticalShort'))}
+      </label>
+    </div>
+  </div>
+  <div class="scale-row">
+    <label class="check">
+      <input type="radio" name="scale-mode" id="scale-mode-pct" value="scale"${scaleMode ? ' checked' : ''}>
+      ${escapeHtml(label('appPrintScaleRatio'))}
+      <input id="scale" type="number" min="10" max="200" step="1" value="${scalePercent}"${scaleMode ? '' : ' disabled'}>
+      <span>${escapeHtml(label('appPrintNormalSize'))}</span>
+    </label>
+    <label class="check">
+      <input type="radio" name="scale-mode" id="scale-mode-fit" value="fit"${scaleMode ? '' : ' checked'}>
+      ${escapeHtml(label('appPrintAdjustTo'))}
+      <select id="fit-adjust"${scaleMode ? ' disabled' : ''}>
+        <option value="sheet"${fitMode !== 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitSheetOnePage'))}</option>
+        <option value="width"${fitMode === 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitColumnsOnePage'))}</option>
+      </select>
+    </label>
+  </div>
+  <div>
+    <div style="margin-bottom:6px">${escapeHtml(label('appPrintMarginsInches'))}</div>
     <div class="margins">
-      <label>${escapeHtml(label('appPrintMarginTop'))}
+      <label class="field">${escapeHtml(label('appPrintMarginTop'))}
         <input id="margin-top" type="number" min="0" max="3" step="0.05" value="${inch(defaults.margins.top)}">
       </label>
-      <label>${escapeHtml(label('appPrintMarginBottom'))}
+      <label class="field">${escapeHtml(label('appPrintMarginBottom'))}
         <input id="margin-bottom" type="number" min="0" max="3" step="0.05" value="${inch(defaults.margins.bottom)}">
       </label>
-      <label>${escapeHtml(label('appPrintMarginLeft'))}
+      <label class="field">${escapeHtml(label('appPrintMarginLeft'))}
         <input id="margin-left" type="number" min="0" max="3" step="0.05" value="${inch(defaults.margins.left)}">
       </label>
-      <label>${escapeHtml(label('appPrintMarginRight'))}
+      <label class="field">${escapeHtml(label('appPrintMarginRight'))}
         <input id="margin-right" type="number" min="0" max="3" step="0.05" value="${inch(defaults.margins.right)}">
       </label>
     </div>
   </div>
-  <div>
-    <div>${escapeHtml(label('appPrintAlign'))}</div>
-    <label class="check">
-      <input id="center-h" type="checkbox"${defaults.horizontalCentered ? ' checked' : ''}>
-      ${escapeHtml(label('appPrintCenterHorizontal'))}
-    </label>
-    <label class="check">
-      <input id="center-v" type="checkbox"${defaults.verticalCentered ? ' checked' : ''}>
-      ${escapeHtml(label('appPrintCenterVertical'))}
-    </label>
-  </div>
-  <label id="color-field">${escapeHtml(label('appPrintColorMode'))}
-    <select id="color">
-      <option value="1">${escapeHtml(label('appPrintColor'))}</option>
-      <option value="0">${escapeHtml(label('appPrintGrayscale'))}</option>
-    </select>
+  <label class="toggle">
+    <span>${escapeHtml(label('appPrintCollate'))}</span>
+    <input id="collate" type="checkbox" checked>
   </label>
-  <label id="duplex-field">${escapeHtml(label('appPrintSides'))}
+  <label class="field">${escapeHtml(label('appPrintSides'))}
     <select id="duplex">
       <option value="simplex">${escapeHtml(label('appPrintOneSided'))}</option>
       <option value="longEdge">${escapeHtml(label('appPrintLongEdge'))}</option>
       <option value="shortEdge">${escapeHtml(label('appPrintShortEdge'))}</option>
     </select>
   </label>
-  <p class="hint" id="no-printer"${none ? '' : ' hidden'}>${escapeHtml(label('appPrintNoPrinter'))}</p>
+  ${none ? `<p class="hint" id="no-printer">${escapeHtml(label('appPrintNoPrinter'))}</p>` : ''}
 </div>
   <div class="actions">
-    <button id="cancel" type="button">${escapeHtml(label('appCancel'))}</button>
-    <button id="save-pdf" type="button">${escapeHtml(label('appPrintSaveAsPdf'))}</button>
-    <button id="print" class="primary" type="button">${escapeHtml(label('appPrintNow'))}</button>
+    <button id="save-pdf" type="button" title="${escapeHtml(label('appPrintSaveAsPdf'))}">${escapeHtml(label('appPrintPdf'))}</button>
+    <div class="actions-end">
+      <button id="cancel" type="button">${escapeHtml(label('appCancel'))}</button>
+      <button id="print" class="primary" type="button"${none ? ' disabled' : ''}>${escapeHtml(label('appPrintNow'))}</button>
+    </div>
   </div>
 </aside>
 <script id="dialog-data" type="application/json">${data}</script>
@@ -267,41 +409,48 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
   const data = JSON.parse(document.getElementById('dialog-data').textContent)
   const SAVE_AS_PDF = ${JSON.stringify(SAVE_AS_PDF_DEVICE)}
   const select = document.getElementById('printer')
-  const pdfOption = document.createElement('option')
-  pdfOption.value = SAVE_AS_PDF
-  pdfOption.textContent = ${JSON.stringify(label('appPrintSaveAsPdf'))}
-  select.appendChild(pdfOption)
   for (const printer of data.printers) {
     const option = document.createElement('option')
     option.value = printer.name
     option.textContent = printer.displayName || printer.name
     select.appendChild(option)
   }
-  if (data.printers.length > 0) select.value = data.printers[0].name
-  const pages = document.getElementById('pages')
-  const range = document.getElementById('range')
-  pages.onchange = () => { range.hidden = pages.value !== 'range' }
+  const pagesAll = document.getElementById('pages-all')
+  const pagesRange = document.getElementById('pages-range')
+  const pageFrom = document.getElementById('page-from')
+  const pageTo = document.getElementById('page-to')
+  const syncPages = () => {
+    const rangeOn = pagesRange.checked
+    pageFrom.disabled = !rangeOn
+    pageTo.disabled = !rangeOn
+  }
+  pagesAll.onchange = syncPages
+  pagesRange.onchange = syncPages
+  syncPages()
   const paper = document.getElementById('paper')
   const customPaper = document.getElementById('custom-paper')
   paper.onchange = () => { customPaper.hidden = paper.value !== 'custom' }
-  const printerOnly = [
-    document.getElementById('printer-copies'),
-    document.getElementById('color-field'),
-    document.getElementById('duplex-field'),
-  ]
-  const noPrinter = document.getElementById('no-printer')
-  const printBtn = document.getElementById('print')
-  const syncDestination = () => {
-    const pdf = select.value === SAVE_AS_PDF
-    for (const el of printerOnly) el.hidden = pdf
-    noPrinter.hidden = pdf || data.printers.length > 0
-    printBtn.disabled = !pdf && data.printers.length === 0
+  const scaleInput = document.getElementById('scale')
+  const fitAdjust = document.getElementById('fit-adjust')
+  const scaleModePct = document.getElementById('scale-mode-pct')
+  const scaleModeFit = document.getElementById('scale-mode-fit')
+  const syncScaleMode = () => {
+    const pct = scaleModePct.checked
+    scaleInput.disabled = !pct
+    fitAdjust.disabled = pct
   }
-  select.onchange = syncDestination
-  syncDestination()
+  scaleModePct.onchange = syncScaleMode
+  scaleModeFit.onchange = syncScaleMode
+  syncScaleMode()
+  const printBtn = document.getElementById('print')
   const num = (id) => Number(document.getElementById(id).value)
+  const currentFitMode = () => {
+    if (scaleModePct.checked) return 'scale'
+    return fitAdjust.value === 'width' ? 'width' : 'sheet'
+  }
+  const landscape = () => document.getElementById('orient-landscape').checked
   const currentLayout = () => ({
-    landscape: document.getElementById('orientation').value === 'landscape',
+    landscape: landscape(),
     pageSize: paper.value === 'custom'
       ? { width: num('paper-width'), height: num('paper-height') }
       : paper.value,
@@ -312,23 +461,32 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
       right: num('margin-right'),
     },
     scale: (Math.round(num('scale')) || 100) / 100,
+    fitMode: currentFitMode(),
     horizontalCentered: document.getElementById('center-h').checked,
     verticalCentered: document.getElementById('center-v').checked,
   })
-  // input fires while spinning or typing so the preview tracks margins,
-  // scale, and alignment immediately; change covers selects and checkboxes.
   const publishLayout = () => window.printDialog.layout(currentLayout())
-  for (const id of ['paper', 'orientation', 'scale', 'center-h', 'center-v', 'paper-width', 'paper-height', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right']) {
+  for (const id of [
+    'paper', 'orient-portrait', 'orient-landscape', 'scale', 'scale-mode-pct', 'scale-mode-fit',
+    'fit-adjust', 'center-h', 'center-v', 'paper-width', 'paper-height',
+    'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
+  ]) {
     const el = document.getElementById(id)
     el.addEventListener('input', publishLayout)
     el.addEventListener('change', publishLayout)
   }
+  const savePdfBtn = document.getElementById('save-pdf')
   const submitChoice = (deviceName) => {
+    if (!window.printDialog) return
+    if (!deviceName) return
+    printBtn.disabled = true
+    savePdfBtn.disabled = true
+    document.getElementById('cancel').disabled = true
     const pageSize = paper.value === 'custom'
       ? { width: num('paper-width'), height: num('paper-height') }
       : paper.value
     let pageRange = null
-    if (pages.value === 'range') {
+    if (pagesRange.checked) {
       let from = Math.round(num('page-from'))
       let to = Math.round(num('page-to'))
       if (from > to) { const swap = from; from = to; to = swap }
@@ -338,9 +496,9 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
       deviceName,
       copies: Math.round(num('copies')) || 1,
       collate: document.getElementById('collate').checked,
-      color: document.getElementById('color').value === '1',
+      color: document.getElementById('color').checked,
       duplexMode: document.getElementById('duplex').value,
-      landscape: document.getElementById('orientation').value === 'landscape',
+      landscape: landscape(),
       pageSize,
       margins: {
         top: num('margin-top'),
@@ -349,13 +507,16 @@ function panelHtml(printers: readonly ListedPrinter[], defaults: PrintDialogDefa
         right: num('margin-right'),
       },
       scale: (Math.round(num('scale')) || 100) / 100,
+      fitMode: currentFitMode(),
       pages: pageRange,
       horizontalCentered: document.getElementById('center-h').checked,
       verticalCentered: document.getElementById('center-v').checked,
     })
   }
-  document.getElementById('cancel').onclick = () => window.printDialog.submit(null)
-  document.getElementById('save-pdf').onclick = () => submitChoice(SAVE_AS_PDF)
+  document.getElementById('cancel').onclick = () => {
+    if (window.printDialog) window.printDialog.submit(null)
+  }
+  savePdfBtn.onclick = () => submitChoice(SAVE_AS_PDF)
   printBtn.onclick = () => submitChoice(select.value)
 </script>
 </body>
@@ -371,34 +532,171 @@ contextBridge.exposeInMainWorld('printDialog', {
 `
 }
 
-/// Fits the paper sheet in the preview and lets a trackpad pinch change that
-/// scale. Zoom lives on `#preview-pages`, which print media forces back to 1.
+/// Builds stacked page cards for screen preview (vertical pagination), then
+/// fits page width into the pane. Pinch zoom only changes the pane scale;
+/// `__contentScale` is what print/PDF must use. Source HTML on disk is
+/// unchanged — print still paginates via Chromium.
 const PREVIEW_FIT_SCRIPT = `(() => {
   if (window.__fitPreview) return
   let userZoom = 1
+  let baseScale = 1
+  let fitMode = 'sheet'
+  const pageOf = ${JSON.stringify(label('appPrintPageOf'))}
+  const originals = [...document.querySelectorAll('.area')]
+  const sources = originals.map((area) => area.cloneNode(true))
+  for (const area of originals) area.remove()
   const fitHost = document.createElement('div')
   fitHost.id = 'preview-fit'
+  const scroll = document.createElement('div')
+  scroll.id = 'preview-scroll'
   const pages = document.createElement('div')
   pages.id = 'preview-pages'
-  const areas = [...document.querySelectorAll('.area')]
-  for (const area of areas) pages.appendChild(area)
-  fitHost.appendChild(pages)
+  scroll.appendChild(pages)
+  fitHost.appendChild(scroll)
+  const pageLabel = document.createElement('div')
+  pageLabel.id = 'preview-page-label'
+  fitHost.appendChild(pageLabel)
   document.body.appendChild(fitHost)
-  const fit = () => {
-    const page = pages.querySelector('.area')
-    if (!page) return
-    const previous = pages.style.zoom
+
+  const applyPageChrome = (area) => {
+    const root = document.documentElement
+    const pageW = root.style.getPropertyValue('--page-w') || getComputedStyle(root).getPropertyValue('--page-w')
+    const pageH = root.style.getPropertyValue('--page-h') || getComputedStyle(root).getPropertyValue('--page-h')
+    const top = root.style.getPropertyValue('--m-top') || getComputedStyle(root).getPropertyValue('--m-top')
+    const right = root.style.getPropertyValue('--m-right') || getComputedStyle(root).getPropertyValue('--m-right')
+    const bottom = root.style.getPropertyValue('--m-bottom') || getComputedStyle(root).getPropertyValue('--m-bottom')
+    const left = root.style.getPropertyValue('--m-left') || getComputedStyle(root).getPropertyValue('--m-left')
+    const align = root.style.getPropertyValue('--align-x') || getComputedStyle(root).getPropertyValue('--align-x') || 'flex-start'
+    const justify = root.style.getPropertyValue('--align-y') || getComputedStyle(root).getPropertyValue('--align-y') || 'flex-start'
+    area.style.boxSizing = 'border-box'
+    area.style.display = 'flex'
+    area.style.flexDirection = 'column'
+    if (pageW) area.style.width = pageW.trim() + 'in'
+    if (pageH) area.style.height = pageH.trim() + 'in'
+    area.style.padding = [top, right, bottom, left].map((v) => (v || '0').trim() + 'in').join(' ')
+    area.style.justifyContent = justify.trim() || 'flex-start'
+    area.style.alignItems = align.trim() || 'flex-start'
+    area.style.overflow = 'hidden'
+  }
+
+  const updatePageLabel = () => {
+    const cards = [...pages.querySelectorAll('.area')]
+    const total = Math.max(1, cards.length)
+    let current = 1
+    if (cards.length > 0) {
+      const mid = scroll.scrollTop + scroll.clientHeight * 0.35
+      const zoom = parseFloat(pages.style.zoom) || 1
+      for (let i = 0; i < cards.length; i++) {
+        const top = cards[i].offsetTop * zoom
+        const bottom = top + cards[i].offsetHeight * zoom
+        if (mid >= top && mid < bottom) {
+          current = i + 1
+          break
+        }
+        if (mid >= bottom) current = i + 1
+      }
+    }
+    pageLabel.textContent = pageOf
+      .replace('{current}', String(current))
+      .replace('{total}', String(total))
+  }
+
+  /// Rebuild stacked page cards from the source print areas.
+  const rebuildPages = () => {
     pages.style.zoom = '1'
-    const width = page.offsetWidth
-    const height = page.offsetHeight
-    if (fitHost.clientWidth < 40 || fitHost.clientHeight < 40 || !width || !height) {
-      if (previous) pages.style.zoom = previous
+    pages.innerHTML = ''
+    let contentScale = baseScale
+    for (const source of sources) {
+      const probe = source.cloneNode(true)
+      pages.appendChild(probe)
+      applyPageChrome(probe)
+      const sheet = probe.querySelector('.sheet')
+      if (!sheet) continue
+      sheet.style.zoom = '1'
+      sheet.style.position = ''
+      sheet.style.top = ''
+      sheet.style.flex = 'none'
+      sheet.style.width = 'max-content'
+      sheet.style.minWidth = 'max-content'
+      const style = getComputedStyle(probe)
+      const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
+      const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
+      const aw = Math.max(probe.clientWidth - padX, 1)
+      const ah = Math.max(probe.clientHeight - padY, 1)
+      const sw = Math.max(sheet.scrollWidth, sheet.offsetWidth, 1)
+      const sh = Math.max(sheet.scrollHeight, sheet.offsetHeight, 1)
+      let zoom = baseScale
+      if (fitMode === 'width') zoom = Math.min(aw / sw, 1)
+      else if (fitMode === 'sheet') zoom = Math.min(aw / sw, ah / sh, 1)
+      zoom = Math.max(0.1, Math.min(2, zoom))
+      contentScale = Math.min(contentScale, zoom)
+      const scaledH = sh * zoom
+      const pageCount = fitMode === 'sheet'
+        ? 1
+        : Math.max(1, Math.ceil(scaledH / ah - 1e-6))
+      probe.remove()
+      const alignX = (getComputedStyle(document.documentElement)
+        .getPropertyValue('--align-x') || 'flex-start').trim() || 'flex-start'
+      for (let index = 0; index < pageCount; index++) {
+        const card = source.cloneNode(true)
+        applyPageChrome(card)
+        const cardSheet = card.querySelector('.sheet')
+        if (!cardSheet) {
+          pages.appendChild(card)
+          continue
+        }
+        cardSheet.style.zoom = String(zoom)
+        cardSheet.style.flex = 'none'
+        cardSheet.style.width = 'max-content'
+        cardSheet.style.minWidth = 'max-content'
+        if (pageCount === 1) {
+          pages.appendChild(card)
+          continue
+        }
+        // Multi-page: clip each card to one printable slice of the sheet.
+        card.style.justifyContent = 'flex-start'
+        card.style.alignItems = alignX
+        const clip = document.createElement('div')
+        clip.className = 'page-clip'
+        clip.style.display = 'flex'
+        clip.style.justifyContent = alignX
+        clip.style.alignItems = 'flex-start'
+        cardSheet.style.position = 'relative'
+        // top is pre-zoom CSS px; visual shift = top * zoom ≈ one printable page.
+        cardSheet.style.top = index === 0 ? '0' : String(-index * ah / zoom) + 'px'
+        cardSheet.replaceWith(clip)
+        clip.appendChild(cardSheet)
+        pages.appendChild(card)
+      }
+    }
+    window.__contentScale = contentScale
+    window.__fitMode = fitMode
+  }
+
+  const fit = () => {
+    rebuildPages()
+    const page = pages.querySelector('.area')
+    if (!page) {
+      updatePageLabel()
       return
     }
-    const fitted = Math.min((fitHost.clientWidth - 32) / width, (fitHost.clientHeight - 32) / height)
+    const width = page.offsetWidth
+    if (scroll.clientWidth < 40 || !width) {
+      updatePageLabel()
+      return
+    }
+    // Fit page width into the pane; height scrolls so every page stays readable.
+    const fitted = (scroll.clientWidth - 32) / width
     pages.style.zoom = String(Math.max(0.2, Math.min(4, fitted * userZoom)))
+    updatePageLabel()
   }
   window.__fitPreview = fit
+  window.__setPrintScale = (scale, mode) => {
+    baseScale = typeof scale === 'number' && scale > 0 ? scale : 1
+    fitMode = mode === 'sheet' || mode === 'width' ? mode : 'scale'
+    fit()
+  }
+  scroll.addEventListener('scroll', updatePageLabel, { passive: true })
   window.addEventListener('resize', fit)
   window.addEventListener('wheel', (event) => {
     if (!event.ctrlKey) return
@@ -426,7 +724,13 @@ async function writeJobHtml(
   destPath: string,
   choice: Pick<
     PrintDialogChoice,
-    'landscape' | 'pageSize' | 'margins' | 'scale' | 'horizontalCentered' | 'verticalCentered'
+    | 'landscape'
+    | 'pageSize'
+    | 'margins'
+    | 'scale'
+    | 'fitMode'
+    | 'horizontalCentered'
+    | 'verticalCentered'
   >,
 ): Promise<void> {
   const layoutCss = previewLayoutCss({
@@ -434,6 +738,8 @@ async function writeJobHtml(
     pageSize: choice.pageSize,
     margins: choice.margins,
     scale: choice.scale,
+    // Job window prints via scaleFactor; keep CSS on fixed scale.
+    fitMode: 'scale',
     horizontalCentered: choice.horizontalCentered,
     verticalCentered: choice.verticalCentered,
   })
@@ -453,34 +759,32 @@ async function openJobWindow(htmlPath: string): Promise<BrowserWindow> {
   return hidden
 }
 
-/// Save-as-PDF from the print dialog. Uses a hidden window (same path as
-/// File → Export PDF) so the preview's zoom / modal chrome cannot empty the
-/// printable area or block the save panel.
+/// Render the dialog's page setup to a PDF file. Caller already picked `outPath`
+/// (save panel must run before the modal print window is destroyed on macOS).
 async function savePdfFromPrintDialog(args: {
-  parent: BrowserWindow | null | undefined
   htmlPath: string
   workDir: string
-  fileName: string
+  outPath: string
   choice: PrintDialogChoice
 }): Promise<WorkbookPrintResult> {
-  const parent = args.parent && !args.parent.isDestroyed() ? args.parent : undefined
-  const selection = await showSaveDialogWithMemory(dialog, parent, {
-    title: label('appExportPdfTitle'),
-    defaultPath: args.fileName,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  })
-  if (selection.canceled || !selection.filePath) return { ok: false }
-
   const pdfHtmlPath = join(args.workDir, 'print-save.pdf.html')
   await writeJobHtml(args.htmlPath, pdfHtmlPath, args.choice)
   const hidden = await openJobWindow(pdfHtmlPath)
   try {
     const pdf = await hidden.webContents.printToPDF(printToPdfOptionsFromDialog(args.choice))
-    await atomicWriteFile(selection.filePath, pdf)
-    return { ok: true, path: selection.filePath }
+    await atomicWriteFile(args.outPath, pdf)
+    return { ok: true, path: args.outPath }
   } finally {
     if (!hidden.isDestroyed()) hidden.destroy()
   }
+}
+
+async function closePrintWindow(win: BrowserWindow): Promise<void> {
+  if (win.isDestroyed()) return
+  await new Promise<void>((resolve) => {
+    win.once('closed', () => resolve())
+    win.destroy()
+  })
 }
 
 /// Silent print through a clean window so the job uses the same HTML/CSS as
@@ -602,17 +906,40 @@ export async function openCombinedPrintDialog(args: {
             sheet.style.width = 'max-content'
             sheet.style.minWidth = 'max-content'
             sheet.style.maxWidth = 'none'
-            sheet.style.zoom = String(layout.scale)
+          }
+          if (typeof window.__setPrintScale === 'function') {
+            window.__setPrintScale(layout.scale, layout.fitMode)
+          } else {
+            for (const sheet of document.querySelectorAll('.sheet')) {
+              sheet.style.zoom = String(layout.scale)
+            }
           }
         })()`,
       )
       .then(() => {
         if (gen !== layoutGen || preview.webContents.isDestroyed()) return
-        if (pageKey === fittedPage) return
         fittedPage = pageKey
         refitPreview()
       })
       .catch(() => undefined)
+  }
+
+  /// sheet/width modes use the preview-measured scale so print matches the
+  /// left pane; scale mode keeps the user’s percent.
+  const resolvePrintScale = async (choice: PrintDialogChoice): Promise<number> => {
+    if (choice.fitMode === 'scale') return choice.scale
+    if (preview.webContents.isDestroyed()) return choice.scale
+    try {
+      const scale = (await preview.webContents.executeJavaScript(
+        'typeof window.__contentScale === "number" ? window.__contentScale : null',
+      )) as number | null
+      if (typeof scale === 'number' && Number.isFinite(scale) && scale >= 0.1 && scale <= 2) {
+        return Math.round(scale * 1000) / 1000
+      }
+    } catch {
+      /* preview torn down */
+    }
+    return choice.scale
   }
 
   let settled = false
@@ -672,30 +999,44 @@ export async function openCombinedPrintDialog(args: {
     })()
   })
 
-  if (!choice || 'error' in choice || win.isDestroyed()) {
+  if (!choice || 'error' in choice) {
     if (!win.isDestroyed()) win.destroy()
     return choice && 'error' in choice ? { ok: false, error: choice.error } : { ok: false }
   }
 
-  // Close the modal preview first so save/print are not blocked, and so the
-  // job runs from clean HTML (same layout CSS the left pane was simulating).
-  if (!win.isDestroyed()) win.destroy()
   try {
+    const scaledChoice = {
+      ...choice,
+      scale: await resolvePrintScale(choice),
+    }
     if (isSaveAsPdfDevice(choice.deviceName)) {
+      // Pick the path while the print window is still open. Destroying the
+      // modal first made macOS drop the save panel with no UI (looked like
+      // "Print to PDF" did nothing).
+      const dialogParent = !win.isDestroyed() ? win : parent
+      const selection = await showSaveDialogWithMemory(dialog, dialogParent, {
+        title: label('appExportPdfTitle'),
+        defaultPath: args.fileName,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (!win.isDestroyed()) await closePrintWindow(win)
+      if (selection.canceled || !selection.filePath) return { ok: false }
       return await savePdfFromPrintDialog({
-        parent,
         htmlPath: args.htmlPath,
         workDir: args.workDir,
-        fileName: args.fileName,
-        choice,
+        outPath: selection.filePath,
+        choice: scaledChoice,
       })
     }
+
+    if (!win.isDestroyed()) await closePrintWindow(win)
     return await printFromPrintDialog({
       htmlPath: args.htmlPath,
       workDir: args.workDir,
-      choice,
+      choice: scaledChoice,
     })
   } catch (error: unknown) {
+    if (!win.isDestroyed()) win.destroy()
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 }

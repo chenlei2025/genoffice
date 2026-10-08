@@ -461,6 +461,10 @@ export interface DesktopApi {
     base64Parts: string[],
     outPath?: string,
   ): Promise<{ ok: boolean; path?: string; error?: string }>
+  /** Merge PDF fragments in memory (print path — no save dialog). */
+  mergePdfBase64(
+    base64Parts: string[],
+  ): Promise<{ ok: boolean; base64?: string; error?: string }>
   /** Export as images: the folder picker plus a pre-authorized temp PDF path the
    *  regular PDF export writes to silently (no reveal, no open) */
   pickExportImagesTarget(): Promise<{ dir: string; pdfPath: string } | null>

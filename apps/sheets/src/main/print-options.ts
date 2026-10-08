@@ -21,13 +21,18 @@ export interface PrintDialogMargins {
   right: number
 }
 
+/// How the dialog scales content onto the paper (WPS print accessory).
+export type PrintFitMode = 'scale' | 'sheet' | 'width'
+
 /// Page setup the dialog opens with: the sheet's effective print settings.
 export interface PrintDialogDefaults {
   landscape: boolean
   pageSize: DialogPageSize
   margins: PrintDialogMargins
-  /// 0.1–2, same unit as the export request.
+  /// 0.1–2; used when fitMode is `scale`.
   scale: number
+  /// `sheet` = whole sheet on one page; `width` = all columns on one page.
+  fitMode: PrintFitMode
   horizontalCentered: boolean
   verticalCentered: boolean
 }
@@ -47,8 +52,13 @@ export interface PreviewLayoutInput {
   pageSize: DialogPageSize
   margins: PrintDialogMargins
   scale: number
+  fitMode: PrintFitMode
   horizontalCentered: boolean
   verticalCentered: boolean
+}
+
+function fitModeOf(value: unknown): PrintFitMode | null {
+  return value === 'scale' || value === 'sheet' || value === 'width' ? value : null
 }
 
 const NAMED = new Set<string>(NAMED_PAGE_SIZES)
@@ -151,10 +161,12 @@ export function parsePrintDialogChoice(
   const scale = Number(raw.scale)
   if (!pageSize || !margins || pages === null) return null
   if (!Number.isFinite(scale) || scale < 0.1 || scale > 2) return null
+  const fitMode = fitModeOf(raw.fitMode)
   if (
     typeof raw.landscape !== 'boolean' ||
     typeof raw.color !== 'boolean' ||
     typeof raw.collate !== 'boolean' ||
+    !fitMode ||
     typeof raw.horizontalCentered !== 'boolean' ||
     typeof raw.verticalCentered !== 'boolean'
   ) {
@@ -170,6 +182,7 @@ export function parsePrintDialogChoice(
     pageSize,
     margins,
     scale,
+    fitMode,
     horizontalCentered: raw.horizontalCentered,
     verticalCentered: raw.verticalCentered,
     ...(pages ? { pages } : {}),
@@ -184,7 +197,10 @@ export function parsePreviewLayout(payload: unknown): PreviewLayoutInput | null 
   const pageSize = pageSizeOf(raw.pageSize)
   const margins = marginsOf(raw.margins)
   const scale = clampScale(raw.scale)
-  if (!pageSize || !margins || scale === null || typeof raw.landscape !== 'boolean') return null
+  const fitMode = fitModeOf(raw.fitMode)
+  if (!pageSize || !margins || scale === null || !fitMode || typeof raw.landscape !== 'boolean') {
+    return null
+  }
   if (typeof raw.horizontalCentered !== 'boolean' || typeof raw.verticalCentered !== 'boolean') {
     return null
   }
@@ -193,6 +209,7 @@ export function parsePreviewLayout(payload: unknown): PreviewLayoutInput | null 
     pageSize,
     margins,
     scale,
+    fitMode,
     horizontalCentered: raw.horizontalCentered,
     verticalCentered: raw.verticalCentered,
   }

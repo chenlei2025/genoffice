@@ -1,6 +1,7 @@
 /// PDF export: renders the print HTML (laid out by the renderer) in a hidden
 /// scripting-disabled window and writes webContents.printToPDF's output where
-/// the save dialog points.
+/// the save dialog points. Print returns PDF bytes so the renderer can use the
+/// shared PDF-app print path (rasterize + system dialog).
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -12,7 +13,6 @@ import { isHeadlessMode, showSaveDialogWithMemory } from '@genoffice/electron-ut
 
 import { atomicWriteFile } from './atomic-write'
 import { evenPageRanges, stitchPlan, type PageVariant } from './pdf-page-variants'
-import { openCombinedPrintDialog } from './print-dialog'
 
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import type { PDFDocument } from 'pdf-lib'
@@ -56,36 +56,27 @@ export async function exportPdf(
   }
 }
 
-/// Print: the laid-out HTML is shown beside the printer and page setup in one
-/// window. The job is sent to the chosen printer without a second system panel.
-/// Header / footer templates are a printToPDF feature; this dialog does not
-/// offer a separate header toggle.
+/// Print: lay out the sheet as PDF bytes. The renderer opens those bytes with
+/// the same pdf.js → system-dialog path as the PDF app.
 export async function printWorkbook(
-  event: IpcMainInvokeEvent,
+  _event: IpcMainInvokeEvent,
   request: WorkbookExportPdfRequest,
 ): Promise<WorkbookPrintResult> {
-  const owner = BrowserWindow.fromWebContents(event.sender)
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-print-'))
   const htmlPath = join(workDir, 'print.html')
+  const window = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: true, javascript: false },
+  })
   try {
     await writeFile(htmlPath, request.html, 'utf8')
-    return await openCombinedPrintDialog({
-      parent: owner,
-      htmlPath,
-      workDir,
-      fileName: request.fileName,
-      settings: {
-        landscape: request.landscape,
-        pageSize: request.pageSize,
-        margins: request.margins,
-        scale: request.scale,
-        horizontalCentered: request.horizontalCentered ?? false,
-        verticalCentered: request.verticalCentered ?? false,
-      },
-    })
+    await window.loadFile(htmlPath)
+    const pdf = await renderPdf(window.webContents, request)
+    return { ok: true, base64: pdf.toString('base64') }
   } catch (error: unknown) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   } finally {
+    window.destroy()
     await rm(workDir, { recursive: true, force: true })
   }
 }

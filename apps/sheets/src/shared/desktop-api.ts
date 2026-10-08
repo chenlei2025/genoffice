@@ -2411,7 +2411,14 @@ export type WorkbookExportPdfResult = z.infer<typeof workbookExportPdfResultSche
 /// `ok: false` without an error is the user closing the dialog. `path` is set
 /// when the destination was Save as PDF and a file was written.
 export const workbookPrintResultSchema = z.union([
-  z.object({ ok: z.literal(true), path: z.string().min(1).optional() }).strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      /// PDF bytes for the shared PDF-app print path (rasterize + system dialog).
+      base64: z.string().min(1).optional(),
+      path: z.string().min(1).optional(),
+    })
+    .strict(),
   z.object({ ok: z.literal(false), error: z.string().optional() }).strict(),
 ])
 export type WorkbookPrintResult = z.infer<typeof workbookPrintResultSchema>

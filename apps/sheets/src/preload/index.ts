@@ -295,11 +295,14 @@ const desktopApi: DesktopApi = {
       !isRecord(result) ||
       typeof result.ok !== 'boolean' ||
       (result.error !== undefined && typeof result.error !== 'string') ||
-      (result.path !== undefined && typeof result.path !== 'string')
+      (result.path !== undefined && typeof result.path !== 'string') ||
+      (result.base64 !== undefined && typeof result.base64 !== 'string')
     ) {
       throw new Error('Invalid print response.')
     }
-    return result as { ok: true; path?: string } | { ok: false; error?: string }
+    return result as
+      | { ok: true; base64?: string; path?: string }
+      | { ok: false; error?: string }
   },
   async exportCsv(request) {
     if (

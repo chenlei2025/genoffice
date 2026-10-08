@@ -476,7 +476,8 @@ export async function handleExportPdf(ctx: PageLayoutContext, outPath?: string):
   }
 }
 
-/// File → Print: the same layout, handed to the system print dialog.
+/// File → Print: lay out as PDF, then print via the PDF app’s rasterize +
+/// system dialog path (same as GenOffice PDF).
 export async function handlePrint(ctx: PageLayoutContext): Promise<boolean> {
   try {
     const payload = await activeSheetPrintPayload(ctx, {
@@ -485,12 +486,18 @@ export async function handlePrint(ctx: PageLayoutContext): Promise<boolean> {
     })
     if (!payload) return false
     const result = await window.desktopApi.printWorkbook(payload)
-    if (result.ok) {
-      ctx.setMessage(result.path ? t('appPdfExported', { path: result.path }) : t('appPrintSent'))
-    } else {
+    if (!result.ok) {
       ctx.setMessage(result.error === undefined ? t('appPrintCanceled') : t('appPrintFailed'))
+      return false
     }
-    return result.ok
+    if (!result.base64) {
+      ctx.setMessage(t('appPrintFailed'))
+      return false
+    }
+    const { printPdfBase64 } = await import('./print-via-pdf')
+    await printPdfBase64(result.base64)
+    ctx.setMessage(t('appPrintSent'))
+    return true
   } catch (error: unknown) {
     // layout errors (empty print area, oversized sheet, bad titles) name the cause
     ctx.setMessage(error instanceof Error ? error.message : t('appPrintFailed'))

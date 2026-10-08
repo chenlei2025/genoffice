@@ -113,23 +113,63 @@ export function PrintDialog({
   const doPrint = async () => {
     const els = pvPages()
     if (!selected || selected.length === 0 || printing) return
-    const sel = new Set(selected)
     setPrinting(true)
-    // pv-print-skip only takes effect in the print stylesheet: the on-screen
-    // (hidden) preview keeps its layout while unselected sheets don't print.
-    els.forEach((el, i) => el.classList.toggle('pv-print-skip', !sel.has(i)))
     const scale = setPrintZoom()
     try {
-      const r = await window.desktop.print(scale)
-      if (r.ok) {
-        onClose()
+      // Lay out preview pages as PDF (same chunk/merge path as export), then
+      // print via the PDF app’s rasterize + system dialog.
+      const pxToTwips = (px: number) => Math.round((px / 96) * 1440)
+      type Group = { w: number; h: number; from: number; to: number }
+      let groups: Group[] = []
+      els.forEach((page, i) => {
+        const w = pxToTwips(parseFloat(page.style.width))
+        const h = pxToTwips(parseFloat(page.style.height))
+        const last = groups[groups.length - 1]
+        if (last && last.w === w && last.h === h) last.to = i
+        else groups.push({ w, h, from: i, to: i })
+      })
+      const PRINT_CHUNK = 10
+      if (els.length > PRINT_CHUNK) {
+        const chunked: Group[] = []
+        for (const g of groups) {
+          for (let s = g.from; s <= g.to; s += PRINT_CHUNK) {
+            chunked.push({ w: g.w, h: g.h, from: s, to: Math.min(s + PRINT_CHUNK - 1, g.to) })
+          }
+        }
+        groups = chunked
+      }
+      const parts: string[] = []
+      for (const g of groups) {
+        els.forEach((page, i) => {
+          page.classList.toggle('pv-print-skip', i < g.from || i > g.to)
+          page.classList.toggle('pv-print-tail', i === g.to)
+        })
+        const part = await window.desktop.printPdfBuffer(g.w, g.h, scale)
+        if (!part.ok || !part.base64) {
+          setStatus(t('appPrintFailed', { error: part.error ?? 'pdf' }))
+          return
+        }
+        parts.push(part.base64)
+      }
+      const merged =
+        parts.length === 1
+          ? { ok: true as const, base64: parts[0]! }
+          : await window.desktop.mergePdfBase64(parts)
+      if (!merged.ok || !merged.base64) {
+        setStatus(t('appPrintFailed', { error: merged.error ?? 'merge' }))
         return
       }
-      if (r.error) setStatus(t('appPrintFailed', { error: r.error }))
-      // not ok without an error = canceled in the system dialog: keep the dialog open
+      const { printPdfBase64 } = await import('../print-via-pdf')
+      await printPdfBase64(
+        merged.base64,
+        selected.map((index) => index + 1),
+      )
+      onClose()
+    } catch (err) {
+      setStatus(t('appPrintFailed', { error: err instanceof Error ? err.message : String(err) }))
     } finally {
       clearPrintZoom()
-      els.forEach((el) => el.classList.remove('pv-print-skip'))
+      els.forEach((el) => el.classList.remove('pv-print-skip', 'pv-print-tail'))
       setPrinting(false)
     }
   }

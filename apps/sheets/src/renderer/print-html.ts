@@ -233,8 +233,9 @@ export function buildSheetPrintPayload(
     const bodyRow = (row: number): string => {
       const cells: string[] = []
       let textHeightPt = 0
+      const heightPt = Math.max(finitePt(worksheet.getRowHeight(row), 20) * 0.75, 10)
       if (headings) {
-        cells.push(`<th class="hd">${row + 1}</th>`)
+        cells.push(`<th class="hd"><div class="clip" style="height:${round(heightPt)}pt">${row + 1}</div></th>`)
       }
       for (let column = area.startColumn; column <= area.endColumn; column += 1) {
         const key = `${row}:${column}`
@@ -256,11 +257,13 @@ export function buildSheetPrintPayload(
             (style?.fs ?? DEFAULT_FONT_SIZE_PT) * LINE_HEIGHT_FACTOR + CELL_VERTICAL_PADDING_PT,
           )
         }
+        // Clip inside a fixed-height box so long cell text cannot stretch the
+        // row (HTML table height is only a minimum without an inner clip).
         cells.push(
-          `<td${span} style="${cellCss(style, rawValue, gridlines)}">${escapeHtml(text)}</td>`,
+          `<td${span} style="${cellCss(style, rawValue, gridlines)}">` +
+            `<div class="clip" style="height:${round(heightPt)}pt">${escapeHtml(text)}</div></td>`,
         )
       }
-      const heightPt = Math.max(finitePt(worksheet.getRowHeight(row), 20) * 0.75, 10)
       printedRowHeightPt = Math.max(heightPt, textHeightPt)
       return `<tr style="height:${round(heightPt)}pt">${cells.join('')}</tr>`
     }
@@ -323,7 +326,11 @@ table { border-collapse: collapse; table-layout: fixed; }
 .pv { position: absolute; overflow: hidden; break-inside: avoid; }
 .xlsx-print-visual { display: block; width: 100%; height: 100%; }
 thead { display: table-header-group; }
-td, th { overflow: hidden; padding: 1pt 3pt; font-size: 11pt; vertical-align: bottom; }
+td, th { overflow: hidden; padding: 0; font-size: 11pt; vertical-align: bottom; }
+td .clip, th .clip {
+  overflow: hidden; box-sizing: border-box; padding: 1pt 3pt;
+  white-space: inherit; word-break: inherit;
+}
 th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
   font-size: 8.5pt; font-weight: 400; text-align: center; vertical-align: middle; }
 </style>${visuals.css ? `<style>${visuals.css}</style>` : ''}</head><body>` +
@@ -384,6 +391,7 @@ th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
         pageSize,
         margins: contentMargins,
         scale,
+        fitMode: setup.fitToPage ? 'sheet' : 'scale',
         horizontalCentered: setup.horizontalCentered,
         verticalCentered: setup.verticalCentered,
       })}</style></head>`,

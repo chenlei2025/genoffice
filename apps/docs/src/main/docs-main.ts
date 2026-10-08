@@ -5139,6 +5139,28 @@ export function registerDocsIpc(): void {
     },
   )
 
+  // merge grouped PDF fragments in memory (print via PDF path)
+  ipcMain.handle('docs:merge-pdf-base64', async (_event, base64Parts: string[]) => {
+    try {
+      if (!Array.isArray(base64Parts) || base64Parts.length === 0) {
+        return { ok: false, error: 'no PDF parts to merge' }
+      }
+      const { PDFDocument } = await import('pdf-lib')
+      const merged = await PDFDocument.create()
+      for (const b64 of base64Parts) {
+        if (typeof b64 !== 'string' || b64.length === 0) {
+          return { ok: false, error: 'invalid PDF part' }
+        }
+        const part = await PDFDocument.load(Buffer.from(b64, 'base64'))
+        const pages = await merged.copyPages(part, part.getPageIndices())
+        for (const page of pages) merged.addPage(page)
+      }
+      return { ok: true, base64: Buffer.from(await merged.save()).toString('base64') }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
   // merge grouped PDF fragments into one file in page order (pdf-lib)
   ipcMain.handle(
     'docs:save-merged-pdf',
