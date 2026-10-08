@@ -483,6 +483,12 @@ pub(crate) fn index_worksheet(
                     .is_some_and(|value| value == "1" || value == "true");
                 page_print.print_headings = attribute_value(&reader, &element, b"headings")?
                     .is_some_and(|value| value == "1" || value == "true");
+                page_print.horizontal_centered =
+                    attribute_value(&reader, &element, b"horizontalCentered")?
+                        .is_some_and(|value| value == "1" || value == "true");
+                page_print.vertical_centered =
+                    attribute_value(&reader, &element, b"verticalCentered")?
+                        .is_some_and(|value| value == "1" || value == "true");
             }
             Event::Start(element) | Event::Empty(element)
                 if element.local_name().as_ref() == b"pageMargins" && !in_custom_sheet_views =>

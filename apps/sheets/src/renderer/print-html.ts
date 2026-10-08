@@ -8,6 +8,7 @@ import { htmlLang, type Lang } from '@genoffice/i18n'
 import { columnIndex, columnLabel } from '@genoffice/xlsx-gateway/domain/cell-address'
 
 import type { WorkbookExportPdfRequest } from '../shared/desktop-api'
+import { previewLayoutCss } from '../shared/preview-layout'
 import type { HeaderFooterParts } from './edit-journal'
 import {
   fitToPageScale,
@@ -307,7 +308,7 @@ export function buildSheetPrintPayload(
       .map((width) => `<col style="width:${round(width)}pt">`)
       .join('')}</colgroup>`
     tables.push(
-      `<div class="area"><table>${colgroup}<thead>${headParts.join('')}</thead><tbody>${bodyParts.join('')}</tbody></table>${overlays.join('')}</div>`,
+      `<div class="area"><div class="sheet"><table>${colgroup}<thead>${headParts.join('')}</thead><tbody>${bodyParts.join('')}</tbody></table>${overlays.join('')}</div></div>`,
     )
   }
 
@@ -317,6 +318,7 @@ export function buildSheetPrintPayload(
 body { margin: 0; font-family: Calibri, 'Helvetica Neue', Arial, ${printCjkFonts(getLang())}, sans-serif; }
 table { border-collapse: collapse; table-layout: fixed; }
 .area { position: relative; }
+.sheet { position: relative; width: max-content; }
 .area + .area { break-before: page; }
 .pv { position: absolute; overflow: hidden; break-inside: avoid; }
 .xlsx-print-visual { display: block; width: 100%; height: 100%; }
@@ -367,13 +369,31 @@ th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
       ...(footerTemplate === undefined ? {} : { footerTemplate }),
     }
   }
+  const contentMargins = {
+    top: margins.top,
+    bottom: margins.bottom,
+    left: margins.left,
+    right: margins.right,
+  }
   return {
     fileName,
-    html,
+    html: html.replace(
+      '</head>',
+      `<style>${previewLayoutCss({
+        landscape,
+        pageSize,
+        margins: contentMargins,
+        scale,
+        horizontalCentered: setup.horizontalCentered,
+        verticalCentered: setup.verticalCentered,
+      })}</style></head>`,
+    ),
     landscape,
     pageSize,
-    margins: { top: margins.top, bottom: margins.bottom, left: margins.left, right: margins.right },
+    margins: contentMargins,
     scale,
+    horizontalCentered: setup.horizontalCentered,
+    verticalCentered: setup.verticalCentered,
     ...templates({ header: setup.header, footer: setup.footer }, 'odd'),
     ...(setup.firstPage === null ? {} : { firstPage: templates(setup.firstPage, 'first') }),
     ...(setup.evenPages === null ? {} : { evenPages: templates(setup.evenPages, 'even') }),

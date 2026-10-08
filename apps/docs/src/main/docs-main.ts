@@ -4940,7 +4940,7 @@ export function registerDocsIpc(): void {
     // print the calling tab's own content; zero margins — the docx page padding provides them.
     // Resolves when the system dialog is dismissed; the print dialog stays open on cancel
     // (ok=false without error) and surfaces real failures.
-    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    const outcome = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       event.sender.print(
         { margins: { marginType: 'none' }, ...printScale(scale) },
         (success, failureReason) => {
@@ -4951,6 +4951,17 @@ export function registerDocsIpc(): void {
         },
       )
     })
+    // macOS Chromium reports "no valid printers" for webContents.print even when
+    // CUPS has destinations. The editor has JavaScript, so fall back to the
+    // system panel. The renderer is awaiting this invoke, so its event loop
+    // can run the script.
+    if (outcome.ok || !outcome.error || process.platform !== 'darwin') return outcome
+    try {
+      await event.sender.executeJavaScript('window.print()', true)
+      return { ok: true }
+    } catch {
+      return outcome
+    }
   })
 
   ipcMain.handle(

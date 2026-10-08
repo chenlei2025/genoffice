@@ -2983,7 +2983,9 @@ export function registerSheetsIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.printWorkbook, async (event, input: unknown) => {
     sessionFor(event)
-    return printWorkbook(event, workbookExportPdfRequestSchema.parse(input))
+    const result = await printWorkbook(event, workbookExportPdfRequestSchema.parse(input))
+    if (result.ok && result.path) openGeneratedFile(result.path)
+    return result
   })
 
   ipcMain.handle(IPC_CHANNELS.exportCsv, async (event, input: unknown) => {

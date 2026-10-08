@@ -294,11 +294,12 @@ const desktopApi: DesktopApi = {
     if (
       !isRecord(result) ||
       typeof result.ok !== 'boolean' ||
-      (result.error !== undefined && typeof result.error !== 'string')
+      (result.error !== undefined && typeof result.error !== 'string') ||
+      (result.path !== undefined && typeof result.path !== 'string')
     ) {
       throw new Error('Invalid print response.')
     }
-    return result as { ok: true } | { ok: false; error?: string }
+    return result as { ok: true; path?: string } | { ok: false; error?: string }
   },
   async exportCsv(request) {
     if (
@@ -1391,6 +1392,8 @@ function parsePagePrintSettings(input: unknown): WorkbookRangeResult['pageSetup'
     (input.fitToPage !== undefined && typeof input.fitToPage !== 'boolean') ||
     (input.printGridlines !== undefined && typeof input.printGridlines !== 'boolean') ||
     (input.printHeadings !== undefined && typeof input.printHeadings !== 'boolean') ||
+    (input.horizontalCentered !== undefined && typeof input.horizontalCentered !== 'boolean') ||
+    (input.verticalCentered !== undefined && typeof input.verticalCentered !== 'boolean') ||
     (input.oddHeader !== undefined && !isBoundedString(input.oddHeader, 500)) ||
     (input.oddFooter !== undefined && !isBoundedString(input.oddFooter, 500)) ||
     (input.differentOddEven !== undefined && typeof input.differentOddEven !== 'boolean') ||
@@ -1438,6 +1441,12 @@ function parsePagePrintSettings(input: unknown): WorkbookRangeResult['pageSetup'
     ...(margins === undefined ? {} : { margins }),
     ...(validated.printGridlines === undefined ? {} : { printGridlines: validated.printGridlines }),
     ...(validated.printHeadings === undefined ? {} : { printHeadings: validated.printHeadings }),
+    ...(validated.horizontalCentered === undefined
+      ? {}
+      : { horizontalCentered: validated.horizontalCentered }),
+    ...(validated.verticalCentered === undefined
+      ? {}
+      : { verticalCentered: validated.verticalCentered }),
     ...(validated.oddHeader === undefined ? {} : { oddHeader: validated.oddHeader }),
     ...(validated.oddFooter === undefined ? {} : { oddFooter: validated.oddFooter }),
     ...(validated.differentOddEven === undefined

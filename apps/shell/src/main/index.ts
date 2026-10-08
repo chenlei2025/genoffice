@@ -106,7 +106,7 @@ import {
   syncCloudProjects,
 } from './cloud-projects'
 import { handleDroppedFiles } from './dropped-files'
-import { collectLaunchPaths } from './launch-paths'
+import { collectLaunchPaths, normalizeLaunchPath } from './launch-paths'
 import {
   genofficeLogout,
   gskLoginInfo,
@@ -5524,6 +5524,42 @@ async function installMainProcessProxy(): Promise<void> {
 
 let pendingLaunchPaths = collectLaunchPaths(process.argv)
 let controlServer: ControlServer | null = null
+// False until requestSingleInstanceLock succeeds. A secondary process must
+// keep queueing open-file paths instead of opening them locally: it is about
+// to quit, and its tab manager does not exist.
+let ownsInstanceLock = false
+// Set once this process has lost the lock and asked to quit. An open-file
+// that arrives after that still has to reach the primary instance.
+let instanceLockDenied = false
+
+function queueLaunchPath(filePath: string): void {
+  const normalized = normalizeLaunchPath(filePath)
+  if (!normalized || pendingLaunchPaths.includes(normalized)) return
+  pendingLaunchPaths.push(normalized)
+}
+
+/** Written by a secondary instance when Launch Services delivers the document after the lock payload was already sent. */
+const launchHandoffFile = () => join(app.getPath('userData'), 'launch-handoff.json')
+
+function publishLaunchHandoff(): void {
+  if (pendingLaunchPaths.length === 0) return
+  try {
+    writeFileSync(launchHandoffFile(), JSON.stringify({ paths: pendingLaunchPaths }))
+  } catch {
+    // the lock payload may still carry the paths
+  }
+}
+
+function consumeLaunchHandoff(): string[] {
+  try {
+    const raw = JSON.parse(readFileSync(launchHandoffFile(), 'utf8')) as { paths?: unknown }
+    rmSync(launchHandoffFile(), { force: true })
+    if (!Array.isArray(raw.paths)) return []
+    return raw.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
+  } catch {
+    return []
+  }
+}
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
 // app keeps running — either way a file opened from Finder would land out of sight.
@@ -5540,24 +5576,42 @@ function openLaunchPaths(paths: readonly string[]): void {
   if (!opened) tabManager?.openHomeTab()
 }
 
-// On macOS a file opened from Finder is not in argv; it arrives via the open-file event (before ready).
-// If another instance already holds the lock, this process exits, and the path must ride along in
-// the lock request's additionalData to the surviving instance — so the lock request is deferred
-// until ready, after the path is known.
+// On macOS a file opened from Finder is not in argv; it arrives via the open-file event.
+// WeChat does not send that event to whichever GenOffice is already running. It asks
+// Launch Services for the registered bundle (`open -a /Applications/GenOffice.app`),
+// which starts a second process when the running copy lives somewhere else (a mounted
+// disk image, for example). That process must forward the path and quit.
+// open-file often lands after ready, and sometimes after the lock payload was sent.
 app.on('open-file', (event, filePath) => {
   event.preventDefault()
-  if (!app.isReady()) {
-    if (!pendingLaunchPaths.includes(filePath)) pendingLaunchPaths.push(filePath)
+  if (!ownsInstanceLock) {
+    queueLaunchPath(filePath)
+    if (instanceLockDenied) publishLaunchHandoff()
     return
   }
+  const path = normalizeLaunchPath(filePath)
   revealShellWindow()
-  openLaunchPaths([filePath])
+  if (path) openLaunchPaths([path])
 })
 
 app.on('second-instance', (_event, argv, _cwd, additionalData) => {
-  const paths = collectLaunchPaths(argv, additionalData)
+  const paths = [
+    ...new Set([...collectLaunchPaths(argv, additionalData), ...consumeLaunchHandoff()]),
+  ]
   revealShellWindow()
-  openLaunchPaths(paths)
+  if (paths.length > 0) openLaunchPaths(paths)
+  // open-file on the secondary can arrive after the lock call already delivered
+  // its payload. The secondary rewrites the handoff file; pick that up before
+  // treating a no-file relaunch as "show Home".
+  setTimeout(() => {
+    const more = consumeLaunchHandoff()
+    if (more.length > 0) {
+      revealShellWindow()
+      openLaunchPaths(more)
+      return
+    }
+    if (paths.length === 0) tabManager?.openHomeTab()
+  }, 1000)
 })
 
 installNavigationGuard(app)
@@ -5642,6 +5696,10 @@ app.whenReady().then(async () => {
     await runHeadlessExportEntry(headlessArgv)
     return
   }
+  // Launch Services posts open-file on a later turn when this process was
+  // started against a specific bundle path. Snapshot the paths after that turn
+  // so the single-instance payload includes the document.
+  await new Promise((resolve) => setTimeout(resolve, 0))
   const lockData = () =>
     pendingLaunchPaths.length > 0
       ? { launchPath: pendingLaunchPaths[0], launchPaths: pendingLaunchPaths }
@@ -5671,9 +5729,12 @@ app.whenReady().then(async () => {
     }
   }
   if (!hasLock) {
+    instanceLockDenied = true
+    publishLaunchHandoff()
     app.quit()
     return
   }
+  ownsInstanceLock = true
   // another GenOffice-family app re-logging in rotates the shared key; the
   // home page re-reads its account status. A logout that leaves only the
   // gsk CLI fallback key is not a login

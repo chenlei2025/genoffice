@@ -284,7 +284,6 @@ import {
 import { installTsvClipboardFix } from './clipboard-tsv'
 import { installFilteredCopyHook } from './filtered-copy'
 import { installFilterRangeOutlineSuppression } from './filter-range-outline'
-import { installFormulaBarAutosize } from './formula-bar-autosize'
 import {
   applyShowFormulasView,
   installFormulaTextInterceptor,
@@ -1775,8 +1774,6 @@ export function App({
     // Formula bar shows harvested formula text on streamed workbooks whose
     // closure gave up; display-only, the engine never sees it.
     const formulaTextDisposable = installFormulaTextInterceptor(runtime, lazyWorkbookRef)
-    // The fx bar grows to fit a wrapped formula instead of clipping it.
-    const formulaBarAutosizeDisposable = installFormulaBarAutosize(runtime)
     // A file formula the engine re-computes into an error shows the file's
     // cached result instead; display-only.
     const cachedValueDisposable = installCachedValueFallbackInterceptor(runtime, lazyWorkbookRef)
@@ -2998,7 +2995,6 @@ export function App({
       tsvClipboardDisposable.dispose()
       formulaViewDisposable.dispose()
       formulaTextDisposable.dispose()
-      formulaBarAutosizeDisposable.dispose()
       cachedValueDisposable.dispose()
       formulaNewlineDisposable.dispose()
       functionProbeDisposable.dispose()
@@ -3669,6 +3665,10 @@ export function App({
   }, [])
 
   function handleRibbonCommand(command: string): void {
+    if (command === 'print') {
+      void handlePrintImpl(pageLayoutContext())
+      return
+    }
     if (command === 'watch-window') {
       setWatchOpen((open) => !open)
       return

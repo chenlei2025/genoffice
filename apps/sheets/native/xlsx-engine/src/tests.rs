@@ -1214,7 +1214,7 @@ fn reads_saved_print_settings_and_print_names() {
 <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
 <customSheetViews><customSheetView guid="{1}"><pageSetup paperSize="1" orientation="landscape"/><headerFooter><oddHeader>decoy</oddHeader></headerFooter></customSheetView></customSheetViews>
 <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
-<printOptions gridLines="1" headings="true"/>
+<printOptions gridLines="1" headings="true" horizontalCentered="1" verticalCentered="true"/>
 <pageMargins left="0.25" right="0.3" top="0.75" bottom="0.8" header="0.3" footer="0.4"/>
 <pageSetup paperSize="9" scale="65" fitToWidth="2" fitToHeight="0" orientation="landscape"/>
 <headerFooter><oddHeader>&amp;CBudget &amp;A</oddHeader><oddFooter>&amp;CSeite &amp;P von &amp;N</oddFooter></headerFooter>
@@ -1261,6 +1261,8 @@ fn reads_saved_print_settings_and_print_names() {
     assert!(setup.fit_to_page);
     assert!(setup.print_gridlines);
     assert!(setup.print_headings);
+    assert!(setup.horizontal_centered);
+    assert!(setup.vertical_centered);
     let margins = setup.margins.expect("margins");
     assert_eq!(margins.left, 0.25);
     assert_eq!(margins.footer, 0.4);

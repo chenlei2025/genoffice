@@ -102,3 +102,8 @@ export {
 } from './renderer-scheme'
 export { installRendererProtocol, registerRendererScheme } from './renderer-protocol'
 export { atomicWriteFile, writeJsonAtomic } from './atomic-write'
+export {
+  presentMacPrintPanel,
+  interpretMacPrintPanelResult,
+  type MacPrintPanelResult,
+} from './mac-print-panel'

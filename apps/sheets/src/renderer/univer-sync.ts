@@ -5300,13 +5300,21 @@ export async function preloadEntireWorkbook(
   runtime: UniverRuntime,
   lazyWorkbookRef: { current: LazyWorkbookState | null },
   setMessage: (message: string) => void,
+  options?: { sheetId?: string },
 ): Promise<void> {
   const state = lazyWorkbookRef.current
   const workbook = runtime.univerAPI.getActiveWorkbook()
   if (!state || !workbook) return
   state.flags.preloadRunning = true
   try {
-    await preloadEntireWorkbookInner(runtime, state, workbook, lazyWorkbookRef, setMessage)
+    await preloadEntireWorkbookInner(
+      runtime,
+      state,
+      workbook,
+      lazyWorkbookRef,
+      setMessage,
+      options?.sheetId,
+    )
   } finally {
     state.flags.preloadRunning = false
   }
@@ -5318,9 +5326,15 @@ async function preloadEntireWorkbookInner(
   workbook: NonNullable<ReturnType<UniverRuntime['univerAPI']['getActiveWorkbook']>>,
   lazyWorkbookRef: { current: LazyWorkbookState | null },
   setMessage: (message: string) => void,
+  onlySheetId?: string,
 ): Promise<void> {
-  for (const sheet of state.file.sheets) {
-    const worksheet = workbook.getSheetBySheetId(sheet.id)
+  // Print loads just the active sheet. That must not flip preloadComplete:
+  // filter and sort still need every sheet.
+  const sheets = onlySheetId
+    ? state.file.sheets.filter((sheet) => sheet.id === onlySheetId)
+    : state.file.sheets
+  for (const sheet of sheets) {
+    const worksheet = workbook.getSheetBySheetId(onlySheetId ?? sheet.id)
     if (!worksheet) continue
     const sheetId = sheet.id
     const rowsPerBlock = Math.max(1, Math.floor(SIDECAR_RANGE_CELL_LIMIT / sheet.columnCount))
@@ -5466,14 +5480,14 @@ async function preloadEntireWorkbookInner(
       if (result.indexingComplete) captureSheetFileState(state, sheetId, result)
     }
     const finalOps = state.editJournal.structuralOps.get(sheet.id) ?? []
-    state.loadedRanges.set(sheetId, {
+    state.loadedRanges.set(onlySheetId ?? sheetId, {
       startRow: 0,
       endRow: sheet.rowCount - 1 + netAxisDelta(finalOps, 'row'),
       startColumn: 0,
       endColumn: sheet.columnCount - 1 + netAxisDelta(finalOps, 'column'),
     })
   }
-  if (lazyWorkbookRef.current === state) {
+  if (lazyWorkbookRef.current === state && !onlySheetId) {
     state.flags.preloadComplete = true
     if (state.formulaMode && !isManualCalculation(runtime)) requestFullRecalcAfterStream()
     setMessage(t('appFullyLoaded'))

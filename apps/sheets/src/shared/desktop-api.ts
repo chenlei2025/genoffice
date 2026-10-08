@@ -958,6 +958,9 @@ export const workbookRangeResultSchema = z
           .optional(),
         printGridlines: z.boolean().optional(),
         printHeadings: z.boolean().optional(),
+        /// printOptions/@horizontalCentered and @verticalCentered.
+        horizontalCentered: z.boolean().optional(),
+        verticalCentered: z.boolean().optional(),
         /// Excel-encoded odd header/footer (&L/&C/&R sections, field codes).
         oddHeader: z.string().min(1).max(500).optional(),
         oddFooter: z.string().min(1).max(500).optional(),
@@ -2376,6 +2379,9 @@ export const workbookExportPdfRequestSchema = z
       })
       .strict(),
     scale: z.number().min(0.1).max(2),
+    /// Center the sheet on the page (Excel's printOptions centered flags).
+    horizontalCentered: z.boolean().optional(),
+    verticalCentered: z.boolean().optional(),
     /// Chromium print header/footer templates (rendered in the margin
     /// boxes; `pageNumber`/`totalPages` spans resolve per page). These are
     /// the odd-page (default) templates.
@@ -2401,10 +2407,11 @@ export const workbookExportPdfResultSchema = z.union([
 export type WorkbookExportPdfRequest = z.infer<typeof workbookExportPdfRequestSchema>
 export type WorkbookExportPdfResult = z.infer<typeof workbookExportPdfResultSchema>
 
-/// Print of the same laid-out HTML through the system print dialog. `ok: false`
-/// without an error is the user closing the dialog.
+/// Print of the same laid-out HTML through the combined print dialog.
+/// `ok: false` without an error is the user closing the dialog. `path` is set
+/// when the destination was Save as PDF and a file was written.
 export const workbookPrintResultSchema = z.union([
-  z.object({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(true), path: z.string().min(1).optional() }).strict(),
   z.object({ ok: z.literal(false), error: z.string().optional() }).strict(),
 ])
 export type WorkbookPrintResult = z.infer<typeof workbookPrintResultSchema>

@@ -539,6 +539,12 @@ pub struct PagePrintInfo {
     pub print_gridlines: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub print_headings: bool,
+    /// printOptions/@horizontalCentered: center the sheet between the side margins.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub horizontal_centered: bool,
+    /// printOptions/@verticalCentered: center the sheet between the top and bottom margins.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub vertical_centered: bool,
     /// Excel-encoded odd header/footer text (&L/&C/&R sections, field codes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub odd_header: Option<String>,

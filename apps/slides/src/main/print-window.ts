@@ -33,8 +33,9 @@ export async function printSlidesHtml(
       'Promise.all([document.fonts.ready, ...Array.from(document.images).map((i) => i.decode().catch(() => {}))])',
       true,
     )
-    // Windows attaches the native dialog to the printed window, which must be visible.
-    if (platform === 'win32') {
+    // The system dialog is attached to this window. A hidden window never
+    // shows it, and print then waits forever.
+    if (platform === 'win32' || platform === 'darwin') {
       win.show()
       win.focus()
     }

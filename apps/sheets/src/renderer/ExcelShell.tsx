@@ -2677,6 +2677,20 @@ function Ribbon({
           </span>
         </button>
       </RibbonGroup>
+      <RibbonGroup label={t('appGroupPrint')}>
+        <button
+          className="ribbon-tool as-button large"
+          data-tip={t('appPrintTip')}
+          onClick={() => onCommand('print')}
+        >
+          <span className="tool-icon-row">
+            <ToolSymbol symbol="print" />
+          </span>
+          <span>
+            <strong>{t('appPrintNow')}</strong>
+          </span>
+        </button>
+      </RibbonGroup>
       <RibbonGroup label={t('appGroupClipboard')}>
         <button
           className="ribbon-tool as-button large"

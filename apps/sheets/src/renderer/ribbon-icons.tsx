@@ -326,6 +326,14 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="m5 8.5 4.5-3.25L14 8l5-3.75" />
     </Icon>
   ),
+  // print: the printer outline
+  print: (
+    <Icon>
+      <path d="M8 9V4.75h8V9" />
+      <path d="M7 16.25H6.25A1.75 1.75 0 0 1 4.5 14.5v-4A1.75 1.75 0 0 1 6.25 8.75h11.5A1.75 1.75 0 0 1 19.5 10.5v4a1.75 1.75 0 0 1-1.75 1.75H17" />
+      <rect x="7.25" y="13.75" width="9.5" height="5.5" rx="0.75" />
+    </Icon>
+  ),
   // ---- clipboard ----
   // paste shares the docs ribbon's clipboard geometry (docs 16-canvas × 1.5);
   // paste special swaps the text lines for option sliders on the same board

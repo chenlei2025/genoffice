@@ -4536,8 +4536,8 @@ export function registerSlidesIpc(): void {
       const owner = hostWindowFor(e.sender) ?? dialogParent()
       const win = new BrowserWindow({
         show: false,
-        ...(owner && !owner.isDestroyed() ? { parent: owner } : {}),
-        ...(process.platform === 'win32'
+        ...(process.platform === 'win32' && owner && !owner.isDestroyed() ? { parent: owner } : {}),
+        ...(process.platform === 'win32' || process.platform === 'darwin'
           ? {
               width: 900,
               height: 700,

@@ -141,6 +141,11 @@ describe('resolveEffectivePageSetup', () => {
     expect(setup.margins.top).toBe(3)
     expect(setup.margins.left).toBe(0.98)
     expect(setup.printGridlines).toBe(true)
+    expect(setup.horizontalCentered).toBe(false)
+    expect(
+      resolveEffectivePageSetup({}, { horizontalCentered: true, verticalCentered: true }, null)
+        .verticalCentered,
+    ).toBe(true)
     expect(setup.printAreas).toEqual(['A1:K84'])
     expect(setup.printTitles).toBe('17:17')
     expect(setup.footer).toEqual({ center: 'Seite &P von &N' })
@@ -383,6 +388,8 @@ function payloadSetup(overrides: Partial<EffectivePageSetup>): EffectivePageSetu
     margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
     printGridlines: false,
     printHeadings: false,
+    horizontalCentered: false,
+    verticalCentered: false,
     printAreas: [],
     printTitles: null,
     header: null,

@@ -46,6 +46,10 @@ export interface EffectivePageSetup {
   readonly margins: PrintMargins
   readonly printGridlines: boolean
   readonly printHeadings: boolean
+  /// Center the sheet between the side margins.
+  readonly horizontalCentered: boolean
+  /// Center the sheet between the top and bottom margins.
+  readonly verticalCentered: boolean
   /// Plain A1 ranges to print ([] = the used range).
   readonly printAreas: readonly string[]
   /// Rows repeated at the top of every page ("1:2"), or null.
@@ -199,6 +203,8 @@ export function resolveEffectivePageSetup(
     margins,
     printGridlines: journal.printGridlines ?? file?.printGridlines ?? false,
     printHeadings: journal.printHeadings ?? file?.printHeadings ?? false,
+    horizontalCentered: file?.horizontalCentered ?? false,
+    verticalCentered: file?.verticalCentered ?? false,
     printAreas: printArea,
     printTitles,
     header,

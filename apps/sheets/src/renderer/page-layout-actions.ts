@@ -23,7 +23,8 @@ import type { HeaderFooterResult } from './HeaderFooterDialog'
 import { t } from './i18n/locale'
 import { effectivePageBreaks } from './page-break-preview'
 import { COLOR_SCHEMES, FONT_SCHEMES, rethemeStyles, THEME_PRESETS } from './themes'
-import { loadVisibleRange } from './univer-sync'
+import { printSheetLoadPlan } from './print-load-plan'
+import { loadVisibleRange, preloadEntireWorkbook } from './univer-sync'
 import {
   buildSheetPrintPayload,
   type HeaderFooterPictureImage,
@@ -36,7 +37,7 @@ import {
 } from './print-settings'
 import { settleVisualNodes, snapshotPrintVisuals } from './print-visuals'
 import { installedVisualFrames, type InstalledVisualFrame } from './WorkbookVisuals'
-import type { LazyWorkbookState, UniverRuntime } from './univer-state'
+import { lazySheetScreenExtent, type LazyWorkbookState, type UniverRuntime } from './univer-state'
 
 const PAPER_NAMES: Record<string, string> = {
   1: 'Letter',
@@ -352,6 +353,61 @@ export function handleApplyHeaderFooter(
   return null
 }
 
+function printPlanFor(ctx: PageLayoutContext, sheetId: string) {
+  const state = ctx.lazyWorkbookRef.current
+  if (!state) return 'ready' as const
+  return printSheetLoadPlan({
+    preloadComplete: state.flags.preloadComplete,
+    preloadRunning: state.flags.preloadRunning,
+    extent: lazySheetScreenExtent(state, sheetId),
+    loaded: state.loadedRanges.get(sheetId) ?? null,
+  })
+}
+
+function waitUntilPrintReady(
+  ctx: PageLayoutContext,
+  sheetId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const tick = (): void => {
+      if (printPlanFor(ctx, sheetId) !== 'wait') resolve(true)
+      else if (Date.now() - started >= timeoutMs) resolve(false)
+      else setTimeout(tick, 200)
+    }
+    tick()
+  })
+}
+
+/// Streaming mode only has the viewport in the grid, and nothing finishes
+/// the load unless the user asks. Print and PDF export ask here: wait out a
+/// preload already in flight, or load this sheet when it fits in memory.
+async function ensureSheetLoadedForPrint(
+  ctx: PageLayoutContext,
+  sheetId: string,
+  messages: { readonly notLoaded: string; readonly preparing: string },
+): Promise<boolean> {
+  let plan = printPlanFor(ctx, sheetId)
+  if (plan === 'wait') {
+    ctx.setMessage(messages.notLoaded)
+    if (!(await waitUntilPrintReady(ctx, sheetId, 120_000))) return false
+    plan = printPlanFor(ctx, sheetId)
+  }
+  if (plan === 'ready') return true
+  if (plan === 'too-large') {
+    ctx.setMessage(t('appPrintTooLarge'))
+    return false
+  }
+  const runtime = ctx.univerRef.current
+  if (!runtime) return false
+  ctx.setMessage(messages.preparing)
+  await preloadEntireWorkbook(runtime, ctx.lazyWorkbookRef, ctx.setMessage, { sheetId })
+  if (printPlanFor(ctx, sheetId) === 'ready') return true
+  ctx.setMessage(messages.notLoaded)
+  return false
+}
+
 /// The active sheet laid out as print HTML with its Page Layout settings, or
 /// null (after a status message) when the workbook is not ready for it.
 async function activeSheetPrintPayload(
@@ -364,13 +420,10 @@ async function activeSheetPrintPayload(
     ctx.setMessage(t('appActiveSheetUnavailable'))
     return null
   }
-  const state = ctx.lazyWorkbookRef.current
-  if (state && !state.flags.preloadComplete) {
-    ctx.setMessage(messages.notLoaded)
-    return null
-  }
-  ctx.setMessage(messages.preparing)
   const sheetId = worksheet.getSheetId()
+  if (!(await ensureSheetLoadedForPrint(ctx, sheetId, messages))) return null
+  ctx.setMessage(messages.preparing)
+  const state = ctx.lazyWorkbookRef.current
   const journal = state?.editJournal.pageSetup.get(sheetId) ?? {}
   const fileSetup = state?.sheetFilePageSetups.get(sheetId) ?? null
   const fileSheet = state?.file.sheets.find((sheet) => sheet.id === sheetId)
@@ -432,8 +485,11 @@ export async function handlePrint(ctx: PageLayoutContext): Promise<boolean> {
     })
     if (!payload) return false
     const result = await window.desktopApi.printWorkbook(payload)
-    if (result.ok) ctx.setMessage(t('appPrintSent'))
-    else ctx.setMessage(result.error === undefined ? t('appPrintCanceled') : t('appPrintFailed'))
+    if (result.ok) {
+      ctx.setMessage(result.path ? t('appPdfExported', { path: result.path }) : t('appPrintSent'))
+    } else {
+      ctx.setMessage(result.error === undefined ? t('appPrintCanceled') : t('appPrintFailed'))
+    }
     return result.ok
   } catch (error: unknown) {
     // layout errors (empty print area, oversized sheet, bad titles) name the cause

@@ -13,6 +13,7 @@ class TestPrintWindow implements PrintWindow {
   focused = false
   failLoad = false
   printResult = { success: true, reason: '' }
+  printCalls = 0
 
   async loadFile(path: string): Promise<void> {
     this.loadedPath = path
@@ -20,12 +21,13 @@ class TestPrintWindow implements PrintWindow {
     if (this.failLoad) throw new Error('load failed')
   }
 
-  webContents = {
+  webContents: PrintWindow['webContents'] = {
     executeJavaScript: async (): Promise<void> => {},
     print: (
       _options: { silent: boolean; printBackground: boolean },
       callback: (success: boolean, reason: string) => void,
     ): void => {
+      this.printCalls += 1
       callback(this.printResult.success, this.printResult.reason)
     },
   }
@@ -60,6 +62,15 @@ describe('slide print window', () => {
     expect(win.destroyed).toBe(true)
     expect(win.directoryExistedAtDestroy).toBe(true)
     expect(existsSync(dirname(win.loadedPath!))).toBe(false)
+  })
+
+  it('shows the macOS print window so the system dialog is visible', async () => {
+    const win = new TestPrintWindow()
+    expect(await printSlidesHtml('<html>deck</html>', win, 'darwin')).toEqual({ ok: true })
+    expect(win.printCalls).toBe(1)
+    expect(win.shown).toBe(true)
+    expect(win.focused).toBe(true)
+    expect(win.destroyed).toBe(true)
   })
 
   it('cleans up on cancellation and load failure', async () => {
