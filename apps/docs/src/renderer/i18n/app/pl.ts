@@ -89,6 +89,7 @@ export const pl = {
   appPrintGroupFailed: 'nie udało się wydrukować grupy stron',
   appPrintTitle: 'Drukuj',
   appPrintProgress: 'Przygotowywanie do drukowania…',
+  appPrintPrinter: 'Drukarka',
   appPrintRange: 'Zakres wydruku',
   appPrintRangeAll: 'Wszystkie strony',
   appPrintRangeCurrent: 'Bieżąca strona',

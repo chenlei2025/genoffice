@@ -95,6 +95,7 @@ export const ko = {
   appPrintGroupFailed: '페이지 그룹 인쇄 실패',
   appPrintTitle: '인쇄',
   appPrintProgress: '인쇄 준비 중…',
+  appPrintPrinter: '프린터',
   appPrintRange: '인쇄 범위',
   appPrintRangeAll: '모든 페이지',
   appPrintRangeCurrent: '현재 페이지',

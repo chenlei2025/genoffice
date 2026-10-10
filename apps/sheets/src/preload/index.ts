@@ -304,6 +304,35 @@ const desktopApi: DesktopApi = {
       | { ok: true; base64?: string; path?: string }
       | { ok: false; error?: string }
   },
+  onPrintRebuild(handler) {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      raw: unknown,
+    ): void => {
+      void (async () => {
+        if (
+          !isRecord(raw) ||
+          typeof raw.requestId !== 'string' ||
+          typeof raw.replyChannel !== 'string' ||
+          (raw.scope !== 'active' && raw.scope !== 'workbook' && raw.scope !== 'selection')
+        ) {
+          return
+        }
+        try {
+          const result = await handler(raw.scope)
+          ipcRenderer.send(raw.replyChannel, result)
+        } catch (error: unknown) {
+          ipcRenderer.send(raw.replyChannel, {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      })()
+    }
+    ipcRenderer.on(IPC_CHANNELS.printRebuildRequest, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.printRebuildRequest, listener)
+    }
+  },
   async exportCsv(request) {
     if (
       !isRecord(request) ||
@@ -2280,13 +2309,30 @@ function isPdfExportRequest(request: unknown): boolean {
     typeof request.scale !== 'number' ||
     request.scale < 0.1 ||
     request.scale > 2 ||
+    (request.fitMode !== undefined &&
+      request.fitMode !== 'scale' &&
+      request.fitMode !== 'sheet' &&
+      request.fitMode !== 'width') ||
     (request.headerTemplate !== undefined &&
       !isBoundedString(request.headerTemplate, MAX_PDF_TEMPLATE_CHARS)) ||
     (request.footerTemplate !== undefined &&
       !isBoundedString(request.footerTemplate, MAX_PDF_TEMPLATE_CHARS)) ||
     (request.firstPage !== undefined && !isPdfPageVariant(request.firstPage)) ||
     (request.evenPages !== undefined && !isPdfPageVariant(request.evenPages)) ||
-    (request.outPath !== undefined && !isBoundedString(request.outPath, 4096))
+    (request.outPath !== undefined && !isBoundedString(request.outPath, 4096)) ||
+    (request.printContent !== undefined && !isPrintContentMeta(request.printContent))
+  )
+}
+
+function isPrintContentMeta(input: unknown): boolean {
+  return (
+    isRecord(input) &&
+    (input.scope === 'active' || input.scope === 'workbook' || input.scope === 'selection') &&
+    typeof input.sheetCount === 'number' &&
+    Number.isInteger(input.sheetCount) &&
+    input.sheetCount >= 1 &&
+    input.sheetCount <= 10_000 &&
+    typeof input.hasSelection === 'boolean'
   )
 }
 

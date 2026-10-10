@@ -87,6 +87,7 @@ export const th = {
   appPrintGroupFailed: 'พิมพ์กลุ่มหน้าไม่สำเร็จ',
   appPrintTitle: 'พิมพ์',
   appPrintProgress: 'กำลังเตรียมพิมพ์…',
+  appPrintPrinter: 'เครื่องพิมพ์',
   appPrintRange: 'ช่วงการพิมพ์',
   appPrintRangeAll: 'ทุกหน้า',
   appPrintRangeCurrent: 'หน้าปัจจุบัน',

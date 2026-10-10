@@ -90,6 +90,7 @@ export const it = {
   appPrintGroupFailed: 'stampa del gruppo di pagine non riuscita',
   appPrintTitle: 'Stampa',
   appPrintProgress: 'Preparazione della stampa…',
+  appPrintPrinter: 'Stampante',
   appPrintRange: 'Intervallo',
   appPrintRangeAll: 'Tutte le pagine',
   appPrintRangeCurrent: 'Pagina corrente',

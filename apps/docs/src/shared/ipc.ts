@@ -454,6 +454,14 @@ export interface DesktopApi {
     pageHeightTwips: number,
     scale?: number,
   ): Promise<{ ok: boolean; base64?: string; error?: string }>
+  /** CUPS / system printers for the Word print dialog */
+  listPrinters(): Promise<Array<{ name: string; displayName: string }>>
+  /** Silent-print a PDF (optional 1-based pages + device) — no second system dialog */
+  printPdfSilent(
+    base64: string,
+    pages?: number[],
+    deviceName?: string,
+  ): Promise<{ ok: boolean; error?: string }>
   /** Merge grouped PDF fragments in order and write to disk (missing outPath opens
    *  the save dialog; a given outPath must come from a previous export dialog) */
   saveMergedPdf(

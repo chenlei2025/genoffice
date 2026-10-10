@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
-  "description": "Shared PDF print: rasterize pages with pdf.js and open the system print dialog (same path as the PDF app).",
+  "description": "Shared PDF print: open the system print dialog on PDF bytes via Chromium's native PDF viewer (same path as the PDF app).",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -14,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.2.108"
   },
   "devDependencies": {

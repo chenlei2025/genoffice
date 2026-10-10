@@ -94,6 +94,7 @@ export const ja = {
   appPrintGroupFailed: 'ページ グループの印刷に失敗しました',
   appPrintTitle: '印刷',
   appPrintProgress: '印刷を準備しています…',
+  appPrintPrinter: 'プリンタ',
   appPrintRange: '印刷範囲',
   appPrintRangeAll: 'すべてのページ',
   appPrintRangeCurrent: '現在のページ',

@@ -88,6 +88,7 @@ export const cs = {
   appPrintGroupFailed: 'tisk skupiny stránek se nezdařil',
   appPrintTitle: 'Tisk',
   appPrintProgress: 'Příprava tisku…',
+  appPrintPrinter: 'Tiskárna',
   appPrintRange: 'Rozsah',
   appPrintRangeAll: 'Všechny stránky',
   appPrintRangeCurrent: 'Aktuální stránka',

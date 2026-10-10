@@ -91,6 +91,7 @@ export const de = {
   appPrintGroupFailed: 'Drucken der Seitengruppe fehlgeschlagen',
   appPrintTitle: 'Drucken',
   appPrintProgress: 'Druck wird vorbereitet…',
+  appPrintPrinter: 'Drucker',
   appPrintRange: 'Druckbereich',
   appPrintRangeAll: 'Alle Seiten',
   appPrintRangeCurrent: 'Aktuelle Seite',

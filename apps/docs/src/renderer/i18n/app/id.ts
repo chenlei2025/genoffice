@@ -90,6 +90,7 @@ export const id = {
   appPrintGroupFailed: 'gagal mencetak grup halaman',
   appPrintTitle: 'Cetak',
   appPrintProgress: 'Menyiapkan pencetakan…',
+  appPrintPrinter: 'Printer',
   appPrintRange: 'Rentang cetak',
   appPrintRangeAll: 'Semua halaman',
   appPrintRangeCurrent: 'Halaman saat ini',

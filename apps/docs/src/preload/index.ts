@@ -156,6 +156,9 @@ const api: DesktopApi = {
     ipcRenderer.invoke('docs:export-html', defaultName, html, outPath),
   printPdfBuffer: (pageWidthTwips: number, pageHeightTwips: number, scale?: number) =>
     ipcRenderer.invoke('docs:print-pdf-buffer', pageWidthTwips, pageHeightTwips, scale),
+  listPrinters: () => ipcRenderer.invoke('docs:list-printers'),
+  printPdfSilent: (base64: string, pages?: number[], deviceName?: string) =>
+    ipcRenderer.invoke('docs:print-pdf-silent', base64, pages, deviceName),
   saveMergedPdf: (defaultName: string, base64Parts: string[], outPath?: string) =>
     ipcRenderer.invoke('docs:save-merged-pdf', defaultName, base64Parts, outPath),
   mergePdfBase64: (base64Parts: string[]) =>

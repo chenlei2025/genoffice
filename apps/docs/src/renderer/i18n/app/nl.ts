@@ -91,6 +91,7 @@ export const nl = {
   appPrintGroupFailed: 'afdrukken van paginagroep mislukt',
   appPrintTitle: 'Afdrukken',
   appPrintProgress: 'Afdrukken voorbereiden…',
+  appPrintPrinter: 'Printer',
   appPrintRange: 'Afdrukbereik',
   appPrintRangeAll: "Alle pagina's",
   appPrintRangeCurrent: 'Huidige pagina',

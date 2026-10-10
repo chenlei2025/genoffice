@@ -90,8 +90,8 @@ export function previewLayoutCss(layout: PreviewLayout): string {
 }
 .sheet { position: relative; width: max-content; flex: none; }
 @media screen {
-  /* macOS print-dialog mat: dark chrome around a white page card. */
-  html, body { margin: 0; height: 100%; background: #2c2c2e; color: #f5f5f7; }
+  /* macOS print-dialog mat: dark chrome around white paper cards. */
+  html, body { margin: 0; height: 100%; background: #1e1e20; color: #f5f5f7; }
   #preview-fit {
     height: 100%;
     overflow: hidden;
@@ -99,41 +99,95 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     flex-direction: column;
     align-items: stretch;
     box-sizing: border-box;
+    background: #1e1e20;
   }
   #preview-scroll {
     flex: 1;
     min-height: 0;
     overflow: auto;
+    display: block;
+    padding: 12px 12px 6px;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    overflow-anchor: none;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, #fff 28%, transparent) transparent;
+    /* Paint-isolate the scroller (no size containment — that can collapse scrollHeight). */
+    contain: layout paint style;
+    transform: translateZ(0);
+  }
+  #preview-scroll::-webkit-scrollbar { width: 8px; }
+  #preview-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, #fff 28%, transparent);
+    border-radius: 4px;
+  }
+  #preview-pages {
     display: flex;
     flex-direction: column;
+    gap: 12px;
     align-items: center;
-    padding: 16px 16px 8px;
-    box-sizing: border-box;
+    /* No transform on the stack — a scaled ancestor disables content-visibility
+       skipping and forces one giant layer while scrolling. */
   }
-  #preview-pages { display: flex; flex-direction: column; gap: 16px; align-items: center; }
+  .preview-card-slot {
+    flex: none;
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    border-radius: 1px;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, #000 22%, transparent),
+      0 2px 6px color-mix(in srgb, #000 35%, transparent),
+      0 10px 24px color-mix(in srgb, #000 28%, transparent);
+    /* Layout size is already pane-scaled; off-screen slots can be skipped. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 400px;
+    contain: strict;
+  }
+  .preview-card-slot[data-empty="1"] {
+    /* Lightweight paper placeholder while the heavy sheet DOM is unmounted. */
+    background: #fff;
+  }
+  .preview-card-bitmap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    user-select: none;
+  }
   #preview-page-label {
     flex: none;
     text-align: center;
-    padding: 8px 16px 12px;
-    font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    opacity: 0.85;
+    padding: 7px 12px 10px;
+    font: 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0.01em;
+    color: color-mix(in srgb, #fff 78%, transparent);
+    background: color-mix(in srgb, #1e1e20 92%, transparent);
+    border-top: 1px solid color-mix(in srgb, #fff 8%, transparent);
     user-select: none;
   }
   .area {
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
     box-sizing: border-box;
     background: #fff;
     color: #000;
     width: calc(var(--page-w) * 1in);
     height: calc(var(--page-h) * 1in);
     padding: calc(var(--m-top) * 1in) calc(var(--m-right) * 1in) calc(var(--m-bottom) * 1in) calc(var(--m-left) * 1in);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+    border: 0;
     display: flex;
-    flex: none;
     flex-direction: column;
     justify-content: var(--align-y);
     align-items: var(--align-x);
     overflow: hidden;
+    transform-origin: top left;
+    contain: layout paint;
   }
   .page-clip {
     flex: 1 1 auto;
@@ -142,38 +196,50 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     overflow: hidden;
     position: relative;
   }
-  /* Base print scale; __fitSheets further shrinks so the sheet fits the page. */
-  .sheet { zoom: var(--print-scale); }
+  /* Screen preview: transform (not zoom) so scroll stays on the compositor. */
+  .sheet {
+    transform-origin: top left;
+    backface-visibility: hidden;
+  }
 }
 @media print {
+  /* White paper under cells — transparent pages rasterize as black in pdf.js. */
   html, body, #preview-fit, #preview-scroll, #preview-pages {
-    background: transparent !important;
+    background: #fff !important;
     color: inherit !important;
     height: auto !important;
     display: block !important;
     overflow: visible !important;
-    zoom: 1 !important;
   }
-  #preview-page-label { display: none !important; }
+  #preview-page-label, .preview-card-slot { display: contents !important; }
+  .preview-card-bitmap { display: none !important; }
   .page-clip {
     display: block !important;
     overflow: visible !important;
     height: auto !important;
   }
-  .sheet { zoom: 1 !important; position: static !important; top: auto !important; }
+  .sheet {
+    zoom: 1 !important;
+    transform: none !important;
+    position: static !important;
+    top: auto !important;
+  }
   .area {
-    background: transparent !important;
+    position: static !important;
+    background: #fff !important;
     width: auto !important;
     height: auto !important;
     min-height: var(--v-min) !important;
     padding: 0 !important;
     margin: 0 !important;
+    border: 0 !important;
     box-shadow: none !important;
     overflow: visible !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: var(--align-y) !important;
     align-items: var(--align-x) !important;
+    transform: none !important;
   }
 }`
 }

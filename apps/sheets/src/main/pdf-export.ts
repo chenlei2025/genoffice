@@ -7,20 +7,26 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { BrowserWindow, dialog } from 'electron'
+import { randomUUID } from 'node:crypto'
+
+import { BrowserWindow, dialog, ipcMain } from 'electron'
 
 import { isHeadlessMode, showSaveDialogWithMemory } from '@genoffice/electron-utils'
 
 import { atomicWriteFile } from './atomic-write'
 import { evenPageRanges, stitchPlan, type PageVariant } from './pdf-page-variants'
+import { openCombinedPrintDialog } from './print-dialog'
+import { IPC_CHANNELS } from '../shared/ipc-channels'
 
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import type { PDFDocument } from 'pdf-lib'
 import type {
+  PrintContentScope,
   WorkbookExportPdfRequest,
   WorkbookExportPdfResult,
   WorkbookPrintResult,
 } from '../shared/desktop-api'
+import { workbookExportPdfRequestSchema } from '../shared/desktop-api'
 
 export async function exportPdf(
   event: IpcMainInvokeEvent,
@@ -56,27 +62,92 @@ export async function exportPdf(
   }
 }
 
-/// Print: lay out the sheet as PDF bytes. The renderer opens those bytes with
-/// the same pdf.js → system-dialog path as the PDF app.
+function settingsFromRequest(request: WorkbookExportPdfRequest) {
+  return {
+    landscape: request.landscape,
+    pageSize: request.pageSize,
+    margins: request.margins,
+    scale: request.scale,
+    fitMode: request.fitMode ?? 'scale',
+    horizontalCentered: request.horizontalCentered ?? false,
+    verticalCentered: request.verticalCentered ?? false,
+  }
+}
+
+/// Ask the Sheets renderer to rebuild print HTML for a new “打印内容” scope.
+async function rebuildPrintContent(
+  owner: BrowserWindow,
+  scope: PrintContentScope,
+): Promise<WorkbookExportPdfRequest | { error: string }> {
+  const requestId = randomUUID()
+  const replyChannel = `workbook:print-rebuild-reply:${requestId}`
+  return await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      ipcMain.removeAllListeners(replyChannel)
+      resolve({ error: 'print rebuild timed out' })
+    }, 120_000)
+    ipcMain.once(replyChannel, (_event, payload: unknown) => {
+      clearTimeout(timer)
+      if (payload && typeof payload === 'object' && 'error' in payload) {
+        const error = (payload as { error?: unknown }).error
+        resolve({ error: typeof error === 'string' ? error : 'print rebuild failed' })
+        return
+      }
+      const parsed = workbookExportPdfRequestSchema.safeParse(payload)
+      resolve(parsed.success ? parsed.data : { error: 'invalid print rebuild payload' })
+    })
+    if (owner.isDestroyed()) {
+      clearTimeout(timer)
+      ipcMain.removeAllListeners(replyChannel)
+      resolve({ error: 'print window closed' })
+      return
+    }
+    owner.webContents.send(IPC_CHANNELS.printRebuildRequest, {
+      requestId,
+      replyChannel,
+      scope,
+    })
+  })
+}
+
+/// Print: one combined dialog (HTML preview left, settings right). Confirm
+/// lays out as PDF and silent-prints it — no second system print panel.
 export async function printWorkbook(
-  _event: IpcMainInvokeEvent,
+  event: IpcMainInvokeEvent,
   request: WorkbookExportPdfRequest,
 ): Promise<WorkbookPrintResult> {
+  const owner = BrowserWindow.fromWebContents(event.sender)
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-print-'))
   const htmlPath = join(workDir, 'print.html')
-  const window = new BrowserWindow({
-    show: false,
-    webPreferences: { sandbox: true, javascript: false },
-  })
   try {
     await writeFile(htmlPath, request.html, 'utf8')
-    await window.loadFile(htmlPath)
-    const pdf = await renderPdf(window.webContents, request)
-    return { ok: true, base64: pdf.toString('base64') }
+    const printContent = request.printContent ?? {
+      scope: 'active' as const,
+      sheetCount: 1,
+      hasSelection: false,
+    }
+    const dialogArgs: Parameters<typeof openCombinedPrintDialog>[0] = {
+      parent: owner,
+      htmlPath,
+      workDir,
+      fileName: request.fileName,
+      settings: settingsFromRequest(request),
+      printContent,
+      sourceRequest: request,
+      renderPdf,
+    }
+    if (owner) {
+      dialogArgs.rebuildContent = async (scope) => {
+        const next = await rebuildPrintContent(owner, scope)
+        if ('error' in next) return next
+        await writeFile(htmlPath, next.html, 'utf8')
+        return { request: next, settings: settingsFromRequest(next) }
+      }
+    }
+    return await openCombinedPrintDialog(dialogArgs)
   } catch (error: unknown) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   } finally {
-    window.destroy()
     await rm(workDir, { recursive: true, force: true })
   }
 }
@@ -117,7 +188,7 @@ async function printPass(
 /// first-page templates, the even pages with the even ones — stitched into
 /// the odd-page print by page index (pdf-lib). Without variants the odd pass
 /// is the whole export (single-pass fast path).
-async function renderPdf(
+export async function renderPdf(
   contents: WebContents,
   request: WorkbookExportPdfRequest,
 ): Promise<Buffer> {

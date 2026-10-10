@@ -88,6 +88,7 @@ export const hi = {
   appPrintGroupFailed: 'पृष्ठ समूह प्रिंट करने में विफल',
   appPrintTitle: 'प्रिंट करें',
   appPrintProgress: 'मुद्रण की तैयारी हो रही है…',
+  appPrintPrinter: 'प्रिंटर',
   appPrintRange: 'प्रिंट श्रेणी',
   appPrintRangeAll: 'सभी पृष्ठ',
   appPrintRangeCurrent: 'वर्तमान पृष्ठ',

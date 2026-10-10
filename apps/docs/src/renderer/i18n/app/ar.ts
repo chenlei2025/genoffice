@@ -85,6 +85,7 @@ export const ar = {
   appPrintGroupFailed: 'فشلت طباعة مجموعة الصفحات',
   appPrintTitle: 'طباعة',
   appPrintProgress: 'جارٍ التحضير للطباعة…',
+  appPrintPrinter: 'الطابعة',
   appPrintRange: 'نطاق الطباعة',
   appPrintRangeAll: 'كل الصفحات',
   appPrintRangeCurrent: 'الصفحة الحالية',

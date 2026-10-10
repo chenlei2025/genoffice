@@ -87,6 +87,7 @@ export const en = {
   appPrintGroupFailed: 'failed to print page group',
   appPrintTitle: 'Print',
   appPrintProgress: 'Preparing to print…',
+  appPrintPrinter: 'Printer',
   appPrintRange: 'Range',
   appPrintRangeAll: 'All pages',
   appPrintRangeCurrent: 'Current page',

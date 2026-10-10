@@ -2379,6 +2379,8 @@ export const workbookExportPdfRequestSchema = z
       })
       .strict(),
     scale: z.number().min(0.1).max(2),
+    /// How the print dialog should open the scale pane (`sheet` / `width` = 调整为).
+    fitMode: z.enum(['scale', 'sheet', 'width']).optional(),
     /// Center the sheet on the page (Excel's printOptions centered flags).
     horizontalCentered: z.boolean().optional(),
     verticalCentered: z.boolean().optional(),
@@ -2396,8 +2398,30 @@ export const workbookExportPdfRequestSchema = z
     /// Headless export mode only (--headless-export): write here instead of
     /// opening the save dialog. Ignored by a normal GUI session.
     outPath: z.string().min(1).max(4096).optional(),
+    /// Print dialog “打印内容” (active sheet / workbook / selection).
+    printContent: z
+      .object({
+        scope: z.enum(['active', 'workbook', 'selection']),
+        sheetCount: z.number().int().min(1).max(10_000),
+        hasSelection: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
+
+export const printContentScopeSchema = z.enum(['active', 'workbook', 'selection'])
+export type PrintContentScope = z.infer<typeof printContentScopeSchema>
+
+export const printRebuildRequestSchema = z
+  .object({
+    requestId: z.string().min(1).max(80),
+    replyChannel: z.string().min(1).max(120),
+    scope: printContentScopeSchema,
+  })
+  .strict()
+
+export type PrintRebuildRequest = z.infer<typeof printRebuildRequestSchema>
 
 export const workbookExportPdfResultSchema = z.union([
   z.object({ canceled: z.literal(true) }).strict(),
@@ -2636,6 +2660,12 @@ export interface DesktopApi {
   ): Promise<{ renamed: boolean; name?: string }>
   exportPdf(request: WorkbookExportPdfRequest): Promise<WorkbookExportPdfResult>
   printWorkbook(request: WorkbookExportPdfRequest): Promise<WorkbookPrintResult>
+  /// While the print dialog is open: rebuild HTML when “打印内容” changes.
+  onPrintRebuild(
+    handler: (
+      scope: PrintContentScope,
+    ) => Promise<WorkbookExportPdfRequest | { error: string }>,
+  ): () => void
   exportCsv(request: WorkbookExportCsvRequest): Promise<WorkbookExportCsvResult>
   /// First Save of a CSV session: native "keep this format?" dialog.
   confirmCsvSave(): Promise<'csv' | 'xlsx' | 'cancel'>

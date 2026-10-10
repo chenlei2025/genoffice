@@ -91,6 +91,7 @@ export const fr = {
   appPrintGroupFailed: "échec de l'impression du groupe de pages",
   appPrintTitle: 'Imprimer',
   appPrintProgress: 'Préparation de l’impression…',
+  appPrintPrinter: 'Imprimante',
   appPrintRange: 'Étendue',
   appPrintRangeAll: 'Toutes les pages',
   appPrintRangeCurrent: 'Page actuelle',

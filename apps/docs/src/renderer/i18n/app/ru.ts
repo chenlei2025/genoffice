@@ -90,6 +90,7 @@ export const ru = {
   appPrintGroupFailed: 'не удалось напечатать группу страниц',
   appPrintTitle: 'Печать',
   appPrintProgress: 'Подготовка к печати…',
+  appPrintPrinter: 'Принтер',
   appPrintRange: 'Диапазон печати',
   appPrintRangeAll: 'Все страницы',
   appPrintRangeCurrent: 'Текущая страница',

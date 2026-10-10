@@ -90,6 +90,7 @@ export const zh = {
   appPrintGroupFailed: '打印分组失败',
   appPrintTitle: '打印',
   appPrintProgress: '正在准备打印…',
+  appPrintPrinter: '打印机',
   appPrintRange: '打印范围',
   appPrintRangeAll: '所有页',
   appPrintRangeCurrent: '当前页',

@@ -84,6 +84,7 @@ export const he = {
   appPrintGroupFailed: 'הדפסת קבוצת העמודים נכשלה',
   appPrintTitle: 'הדפסה',
   appPrintProgress: 'מתכונן להדפסה…',
+  appPrintPrinter: 'מדפסת',
   appPrintRange: 'טווח הדפסה',
   appPrintRangeAll: 'כל העמודים',
   appPrintRangeCurrent: 'עמוד נוכחי',

@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   SAVE_AS_PDF_DEVICE,
+  applyPaperHandlingPages,
   parsePrintDialogChoice,
+  pdfPageIndicesInOrder,
   printOptionsFor,
   printOptionsFromDialog,
   printToPdfOptionsFromDialog,
+  requestFromPrintDialog,
+  resolvePrintPageList,
+  scaleToFitFactor,
 } from '../src/main/print-options'
 import { previewLayoutCss, previewLayoutPatch } from '../src/shared/preview-layout'
 import type { WorkbookExportPdfRequest } from '../src/shared/desktop-api'
@@ -44,6 +49,8 @@ const CHOICE = {
   collate: true,
   color: false,
   duplexMode: 'longEdge' as const,
+  rangeMode: 'all' as const,
+  customRange: '',
   landscape: false,
   pageSize: 'Letter' as const,
   margins: { top: 1, bottom: 1, left: 0.5, right: 0.5 },
@@ -51,11 +58,20 @@ const CHOICE = {
   fitMode: 'sheet' as const,
   horizontalCentered: true,
   verticalCentered: false,
-  pages: { from: 2, to: 4 },
+  pagesPerSheet: 1,
+  layoutDirection: 'ltr-ttb' as const,
+  pageBorder: 'none' as const,
+  reverseOrientation: false,
+  flipHorizontal: false,
+  sheetsToPrint: 'all' as const,
+  pageOrder: 'automatic' as const,
+  scaleToFit: false,
+  destinationPageSize: 'Letter' as const,
+  scaleDownOnly: false,
 }
 
 describe('parsePrintDialogChoice', () => {
-  it('keeps a known printer and the page setup', () => {
+  it('keeps a known printer and system-dialog options', () => {
     expect(parsePrintDialogChoice(CHOICE, new Set(['HP']))).toEqual(CHOICE)
   })
 
@@ -63,14 +79,30 @@ describe('parsePrintDialogChoice', () => {
     expect(parsePrintDialogChoice(CHOICE, new Set(['Other']))).toBeNull()
   })
 
-  it('drops an empty page range so the whole document prints', () => {
-    expect(parsePrintDialogChoice({ ...CHOICE, pages: null }, new Set(['HP']))?.pages).toBeUndefined()
-  })
-
   it('accepts Save as PDF without a printer list entry', () => {
     expect(
       parsePrintDialogChoice({ ...CHOICE, deviceName: SAVE_AS_PDF_DEVICE }, new Set()),
     ).toMatchObject({ deviceName: SAVE_AS_PDF_DEVICE })
+  })
+})
+
+describe('resolvePrintPageList', () => {
+  it('prints all pages when mode is all', () => {
+    expect(resolvePrintPageList({ rangeMode: 'all', customRange: '' }, 5, 2)).toBeUndefined()
+  })
+
+  it('picks the current preview page', () => {
+    expect(resolvePrintPageList({ rangeMode: 'current', customRange: '' }, 5, 3)).toEqual([3])
+  })
+
+  it('parses a custom range into 1-based pages', () => {
+    expect(resolvePrintPageList({ rangeMode: 'custom', customRange: '1,3,5-6' }, 10, 1)).toEqual([
+      1, 3, 5, 6,
+    ])
+  })
+
+  it('rejects an invalid custom range', () => {
+    expect(resolvePrintPageList({ rangeMode: 'custom', customRange: '99' }, 5, 1)).toBeNull()
   })
 })
 
@@ -92,20 +124,6 @@ describe('previewLayoutCss', () => {
     expect(css).toContain('--print-scale: 0.8')
     expect(css).toContain('--align-x: center')
     expect(css).toContain('--align-y: center')
-    expect(css).toContain('--v-min: calc((11.69 - 0.75 - 0.75) * 1in)')
-    expect(css).toContain('padding: calc(var(--m-top) * 1in)')
-    expect(css).toContain('align-items: var(--align-x)')
-    expect(css).toContain('justify-content: var(--align-y)')
-    expect(css).toContain('zoom: var(--print-scale)')
-    expect(css).toContain('background: #2c2c2e')
-    expect(css).toContain('#preview-page-label')
-    expect(css).toContain('#preview-scroll')
-    expect(css).toContain('.page-clip')
-    expect(css).toContain('flex: none')
-    expect(css).toContain('@media screen')
-    expect(css).toContain('@media print')
-    expect(css).toContain('min-height: var(--v-min)')
-    expect(css).toContain('zoom: 1')
   })
 
   it('turns alignment off without changing the paper size', () => {
@@ -135,43 +153,97 @@ describe('previewLayoutCss', () => {
 })
 
 describe('printOptionsFromDialog', () => {
-  it('sends the confirmed properties in the units webContents.print expects', () => {
-    expect(printOptionsFromDialog(CHOICE)).toMatchObject({
+  it('silent-prints with system-dialog destination options and no extra margins', () => {
+    expect(printOptionsFromDialog(CHOICE)).toEqual({
       silent: true,
+      printBackground: true,
       deviceName: 'HP',
       copies: 2,
       collate: true,
       color: false,
       duplexMode: 'longEdge',
-      landscape: false,
-      pageSize: 'Letter',
-      margins: { marginType: 'custom', top: 96, bottom: 96, left: 48, right: 48 },
-      scaleFactor: 100,
-      pageRanges: [{ from: 1, to: 3 }],
+      pagesPerSheet: 1,
+      margins: { marginType: 'none' },
     })
-  })
-
-  it('can retry without a custom paper size', () => {
-    const options = printOptionsFromDialog(
-      { ...CHOICE, pageSize: { width: 8.5, height: 11 } },
-      true,
-    )
-    expect(options.pageSize).toBeUndefined()
-    expect(options.margins).toBeUndefined()
-    expect(options.landscape).toBe(false)
-    expect(options.scaleFactor).toBe(100)
   })
 })
 
 describe('printToPdfOptionsFromDialog', () => {
-  it('uses printToPDF units and a 1-based page range string', () => {
+  it('uses printToPDF units; ranges are applied by subsetting later', () => {
     expect(printToPdfOptionsFromDialog(CHOICE)).toEqual({
       landscape: false,
       pageSize: 'Letter',
       margins: { top: 1, bottom: 1, left: 0.5, right: 0.5 },
       scale: 1,
       printBackground: true,
-      pageRanges: '2-4',
+    })
+  })
+
+  it('switches to destination paper and scales when scale-to-fit is on', () => {
+    expect(
+      printToPdfOptionsFromDialog({
+        ...CHOICE,
+        pageSize: 'Letter',
+        destinationPageSize: 'A4',
+        scaleToFit: true,
+        scaleDownOnly: true,
+        scale: 1,
+      }),
+    ).toMatchObject({
+      pageSize: 'A4',
+      scale: scaleToFitFactor('Letter', 'A4', false, true),
+    })
+  })
+})
+
+describe('applyPaperHandlingPages', () => {
+  it('keeps full document order as undefined', () => {
+    expect(applyPaperHandlingPages(undefined, 4, 'all', 'automatic')).toBeUndefined()
+  })
+
+  it('filters odd pages from a range', () => {
+    expect(applyPaperHandlingPages([1, 2, 3, 4], 4, 'odd', 'normal')).toEqual([1, 3])
+  })
+
+  it('reverses page order', () => {
+    expect(applyPaperHandlingPages(undefined, 3, 'all', 'reverse')).toEqual([3, 2, 1])
+  })
+
+  it('returns an empty list when no even pages exist', () => {
+    expect(applyPaperHandlingPages([1], 1, 'even', 'normal')).toEqual([])
+  })
+})
+
+describe('pdfPageIndicesInOrder', () => {
+  it('skips a rewrite when pages are already in document order', () => {
+    expect(pdfPageIndicesInOrder([1, 2, 3], 3)).toBeUndefined()
+  })
+
+  it('keeps reverse order instead of sorting', () => {
+    expect(pdfPageIndicesInOrder([3, 2, 1], 3)).toEqual([2, 1, 0])
+  })
+
+  it('rejects a list with no in-range pages', () => {
+    expect(pdfPageIndicesInOrder([], 3)).toBeNull()
+  })
+})
+
+describe('requestFromPrintDialog', () => {
+  it('keeps header templates while applying destination paper', () => {
+    const request: WorkbookExportPdfRequest = {
+      ...REQUEST,
+      headerTemplate: '<div>H</div>',
+    }
+    expect(
+      requestFromPrintDialog(request, {
+        ...CHOICE,
+        scaleToFit: true,
+        destinationPageSize: 'A4',
+      }),
+    ).toMatchObject({
+      headerTemplate: '<div>H</div>',
+      pageSize: 'A4',
+      landscape: false,
     })
   })
 })

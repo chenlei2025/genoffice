@@ -87,6 +87,7 @@ export const vi = {
   appPrintGroupFailed: 'In nhóm trang thất bại',
   appPrintTitle: 'In',
   appPrintProgress: 'Đang chuẩn bị in…',
+  appPrintPrinter: 'Máy in',
   appPrintRange: 'Phạm vi',
   appPrintRangeAll: 'Tất cả các trang',
   appPrintRangeCurrent: 'Trang hiện tại',

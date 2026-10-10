@@ -5161,6 +5161,95 @@ export function registerDocsIpc(): void {
     }
   })
 
+  /// Printers for the Word print dialog (silent print needs a chosen device).
+  ipcMain.handle('docs:list-printers', async (event) => {
+    try {
+      const listed = await event.sender.getPrintersAsync()
+      return listed.map((p) => ({
+        name: p.name,
+        displayName: p.displayName || p.name,
+      }))
+    } catch {
+      return []
+    }
+  })
+
+  /// Silent-print PDF bytes so the preview dialog stays the only UI.
+  ipcMain.handle(
+    'docs:print-pdf-silent',
+    async (_event, base64: unknown, pages?: unknown, deviceName?: unknown) => {
+      if (typeof base64 !== 'string' || base64.length === 0) {
+        return { ok: false, error: 'invalid PDF' }
+      }
+      const pageList = Array.isArray(pages)
+        ? pages.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 1)
+        : []
+      const printer =
+        typeof deviceName === 'string' && deviceName.trim().length > 0
+          ? deviceName.trim()
+          : undefined
+      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-docs-print-'))
+      try {
+        let bytes = Buffer.from(base64, 'base64')
+        if (pageList.length > 0) {
+          const { PDFDocument } = await import('pdf-lib')
+          const src = await PDFDocument.load(bytes)
+          const count = src.getPageCount()
+          const indices = [
+            ...new Set(
+              pageList
+                .filter((n) => n >= 1 && n <= count)
+                .map((n) => n - 1),
+            ),
+          ].sort((a, b) => a - b)
+          if (indices.length === 0) {
+            return { ok: false, error: 'none of the requested pages exist' }
+          }
+          if (indices.length < count) {
+            const out = await PDFDocument.create()
+            const copied = await out.copyPages(src, indices)
+            for (const page of copied) out.addPage(page)
+            bytes = Buffer.from(await out.save())
+          }
+        }
+        const pdfPath = join(workDir, 'job.pdf')
+        await writeFile(pdfPath, bytes)
+        const win = new BrowserWindow({
+          show: false,
+          webPreferences: { sandbox: true },
+        })
+        try {
+          await win.loadFile(pdfPath)
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 400)
+          })
+          const outcome = await new Promise<{ success: boolean; failureReason: string }>(
+            (resolve) => {
+              win.webContents.print(
+                {
+                  silent: true,
+                  ...(printer ? { deviceName: printer } : {}),
+                  margins: { marginType: 'none' },
+                },
+                (success, failureReason) => resolve({ success, failureReason }),
+              )
+            },
+          )
+          if (outcome.success) return { ok: true }
+          return /cancel/i.test(outcome.failureReason)
+            ? { ok: false }
+            : { ok: false, error: outcome.failureReason || 'print failed' }
+        } finally {
+          if (!win.isDestroyed()) win.destroy()
+        }
+      } catch (err) {
+        return { ok: false, error: String(err) }
+      } finally {
+        await rm(workDir, { recursive: true, force: true })
+      }
+    },
+  )
+
   // merge grouped PDF fragments into one file in page order (pdf-lib)
   ipcMain.handle(
     'docs:save-merged-pdf',

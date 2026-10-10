@@ -171,6 +171,8 @@ const PAPER_WIDTH_INCHES: Record<string, number> = {
   A5: 5.83,
 }
 
+export type PrintAreasOverride = readonly string[]
+
 export function buildSheetPrintPayload(
   worksheet: PrintWorksheet,
   setup: EffectivePageSetup,
@@ -178,11 +180,15 @@ export function buildSheetPrintPayload(
   sheetName: string,
   pictures: HeaderFooterPictures = new Map(),
   visuals: PrintVisualSnapshot = { visuals: [], css: '' },
+  /// When set (e.g. Print Selection), replaces the sheet’s saved print areas.
+  areasOverride?: PrintAreasOverride,
 ): WorkbookExportPdfRequest {
   const areas =
-    setup.printAreas.length > 0
-      ? setup.printAreas.map(parseArea)
-      : [usedArea(worksheet, visuals.visuals)]
+    areasOverride && areasOverride.length > 0
+      ? areasOverride.map(parseArea)
+      : setup.printAreas.length > 0
+        ? setup.printAreas.map(parseArea)
+        : [usedArea(worksheet, visuals.visuals)]
   const titles = setup.printTitles ? parseTitleRows(setup.printTitles) : null
   const headings = setup.printHeadings
   const gridlines = setup.printGridlines
@@ -400,12 +406,46 @@ th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
     pageSize,
     margins: contentMargins,
     scale,
+    fitMode: setup.fitToPage
+      ? setup.fitToWidth >= 1 && setup.fitToHeight === 0
+        ? 'width'
+        : 'sheet'
+      : 'scale',
     horizontalCentered: setup.horizontalCentered,
     verticalCentered: setup.verticalCentered,
     ...templates({ header: setup.header, footer: setup.footer }, 'odd'),
     ...(setup.firstPage === null ? {} : { firstPage: templates(setup.firstPage, 'first') }),
     ...(setup.evenPages === null ? {} : { evenPages: templates(setup.evenPages, 'even') }),
   }
+}
+
+/// Concatenate several sheet print jobs into one HTML document (workbook print).
+/// Page chrome (size / margins / scale) comes from `chrome`; body `.area` blocks
+/// follow `parts` order (workbook order) with page breaks between sheets.
+export function mergePrintPayloads(
+  chrome: WorkbookExportPdfRequest,
+  parts: readonly WorkbookExportPdfRequest[],
+): WorkbookExportPdfRequest {
+  if (parts.length <= 1) return parts[0] ?? chrome
+  const bodies: string[] = []
+  const extraStyles: string[] = []
+  for (const payload of parts) {
+    const body = /<body[^>]*>([\s\S]*)<\/body>/i.exec(payload.html)?.[1]?.trim()
+    if (body) bodies.push(body)
+    if (payload === chrome) continue
+    for (const match of payload.html.matchAll(/<style[^>]*>[\s\S]*?<\/style>/gi)) {
+      const tag = match[0]
+      if (tag.includes('.area + .area') || tag.includes('--page-w:')) continue
+      extraStyles.push(tag)
+    }
+  }
+  let html = chrome.html.replace(/<body[^>]*>[\s\S]*<\/body>/i, `<body>${bodies.join('\n')}</body>`)
+  if (extraStyles.length > 0) {
+    html = html.includes('</head>')
+      ? html.replace('</head>', `${extraStyles.join('')}</head>`)
+      : `${html}${extraStyles.join('')}`
+  }
+  return { ...chrome, html }
 }
 
 /// The `&G` pictures of one header or footer's three sections, for one page

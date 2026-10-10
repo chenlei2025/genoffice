@@ -5240,12 +5240,7 @@ export default function App() {
         setPrinting(true)
         try {
           const data = await window.pdfApi.readFile(filePath)
-          const pdoc = await getDocument({ data: new Uint8Array(data), ...DOC_OPTS }).promise
-          try {
-            await printPdf(pdoc, pages)
-          } finally {
-            void pdoc.loadingTask.destroy()
-          }
+          await printPdf(new Uint8Array(data), pages)
         } catch (err) {
           opFailed(err instanceof Error ? err.message : String(err))
         } finally {

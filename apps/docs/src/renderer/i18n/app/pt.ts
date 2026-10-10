@@ -89,6 +89,7 @@ export const pt = {
   appPrintGroupFailed: 'falha ao imprimir o grupo de páginas',
   appPrintTitle: 'Imprimir',
   appPrintProgress: 'Preparando para imprimir…',
+  appPrintPrinter: 'Impressora',
   appPrintRange: 'Intervalo',
   appPrintRangeAll: 'Todas as páginas',
   appPrintRangeCurrent: 'Página atual',

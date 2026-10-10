@@ -84,6 +84,7 @@ export const zhTW = {
   appPrintGroupFailed: '列印分組失敗',
   appPrintTitle: '列印',
   appPrintProgress: '正在準備列印…',
+  appPrintPrinter: '印表機',
   appPrintRange: '列印範圍',
   appPrintRangeAll: '所有頁面',
   appPrintRangeCurrent: '目前頁面',

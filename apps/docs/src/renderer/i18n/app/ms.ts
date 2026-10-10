@@ -91,6 +91,7 @@ export const ms = {
   appPrintGroupFailed: 'gagal mencetak kumpulan halaman',
   appPrintTitle: 'Cetak',
   appPrintProgress: 'Bersedia untuk mencetak…',
+  appPrintPrinter: 'Pencetak',
   appPrintRange: 'Julat cetakan',
   appPrintRangeAll: 'Semua halaman',
   appPrintRangeCurrent: 'Halaman semasa',
