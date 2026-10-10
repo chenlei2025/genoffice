@@ -106,26 +106,26 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     min-height: 0;
     overflow: auto;
     display: block;
-    padding: 12px 12px 6px;
+    padding: 16px 14px 10px;
     box-sizing: border-box;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     overflow-anchor: none;
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, CanvasText 28%, transparent) transparent;
+    scrollbar-color: color-mix(in srgb, CanvasText 26%, transparent) transparent;
     /* Paint-isolate the scroller (no size containment — that can collapse scrollHeight). */
     contain: layout paint style;
     transform: translateZ(0);
   }
   #preview-scroll::-webkit-scrollbar { width: 8px; }
   #preview-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, CanvasText 28%, transparent);
+    background: color-mix(in srgb, CanvasText 26%, transparent);
     border-radius: 4px;
   }
   #preview-pages {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
     align-items: center;
     /* No transform on the stack — a scaled ancestor disables content-visibility
        skipping and forces one giant layer while scrolling. */
@@ -135,11 +135,11 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     position: relative;
     overflow: hidden;
     background: #fff;
-    border-radius: 1px;
+    border-radius: 2px;
     box-shadow:
-      0 0 0 1px color-mix(in srgb, #000 22%, transparent),
-      0 2px 6px color-mix(in srgb, #000 35%, transparent),
-      0 10px 24px color-mix(in srgb, #000 28%, transparent);
+      0 0 0 1px color-mix(in srgb, CanvasText 14%, transparent),
+      0 1px 2px color-mix(in srgb, CanvasText 10%, transparent),
+      0 6px 18px color-mix(in srgb, CanvasText 12%, transparent);
     /* Layout size is already pane-scaled; off-screen slots can be skipped. */
     content-visibility: auto;
     contain-intrinsic-size: auto 400px;
@@ -162,12 +162,12 @@ export function previewLayoutCss(layout: PreviewLayout): string {
   #preview-page-label {
     flex: none;
     text-align: center;
-    padding: 7px 12px 10px;
-    font: 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    letter-spacing: 0.01em;
-    color: color-mix(in srgb, CanvasText 70%, transparent);
+    padding: 8px 14px 12px;
+    font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0.02em;
+    color: color-mix(in srgb, CanvasText 62%, transparent);
     background: Canvas;
-    border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+    border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
     user-select: none;
   }
   .area {

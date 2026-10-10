@@ -7624,7 +7624,9 @@ export function App() {
         />
       )}
 
-      {doc && showPrintDialog && <PrintDialog onClose={closePrintDialog} setStatus={setStatus} />}
+      {doc && showPrintDialog && (
+        <PrintDialog onClose={closePrintDialog} setStatus={setStatus} fileName={doc.fileName} />
+      )}
 
       {stats && <WordCountDialog stats={stats} onClose={() => setStats(null)} />}
 

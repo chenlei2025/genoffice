@@ -462,6 +462,11 @@ export interface DesktopApi {
     pages?: number[],
     deviceName?: string,
   ): Promise<{ ok: boolean; error?: string }>
+  /** Sheets-style combined print dialog (left PDF preview + right sidebar) */
+  printCombined(
+    base64: string,
+    fileName: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }>
   /** Merge grouped PDF fragments in order and write to disk (missing outPath opens
    *  the save dialog; a given outPath must come from a previous export dialog) */
   saveMergedPdf(

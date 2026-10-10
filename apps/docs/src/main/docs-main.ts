@@ -170,6 +170,7 @@ import { copyImageDisplaySize, validCopyImageDataUrl } from './copy-image-guard'
 import { printScaleOption, validPrintGeometry } from './print-args'
 import { initDocsAutoUpdater } from './updater'
 import { registerZoteroIpc, teardownZoteroIpc } from './zotero-ipc'
+import { openDocumentPrintDialog } from '../../../sheets/src/main/print-dialog'
 
 /**
  * Docs main-process logic as an embeddable module: no top-level side effects.
@@ -5173,6 +5174,38 @@ export function registerDocsIpc(): void {
       return []
     }
   })
+
+  /// Combined Sheets-style print dialog: left PDF preview, right sidebar.
+  ipcMain.handle(
+    'docs:print-combined',
+    async (event, base64: unknown, fileName: unknown) => {
+      if (typeof base64 !== 'string' || base64.length === 0) {
+        return { ok: false, error: 'invalid PDF' }
+      }
+      const suggested =
+        typeof fileName === 'string' && fileName.trim()
+          ? fileName.replace(/\.docx$/i, '') + '.pdf'
+          : 'Document.pdf'
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-docs-print-dlg-'))
+      try {
+        const pdfPath = join(workDir, 'preview.pdf')
+        await writeFile(pdfPath, Buffer.from(base64, 'base64'))
+        /// Keep workDir until the dialog finishes — left-pane PDF + preload
+        /// + panel HTML all live there for the lifetime of the window.
+        return await openDocumentPrintDialog({
+          parent: owner && !owner.isDestroyed() ? owner : null,
+          pdfPath,
+          workDir,
+          fileName: suggested,
+        })
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        await rm(workDir, { recursive: true, force: true }).catch(() => undefined)
+      }
+    },
+  )
 
   /// Silent-print PDF bytes so the preview dialog stays the only UI.
   ipcMain.handle(

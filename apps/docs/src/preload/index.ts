@@ -159,6 +159,8 @@ const api: DesktopApi = {
   listPrinters: () => ipcRenderer.invoke('docs:list-printers'),
   printPdfSilent: (base64: string, pages?: number[], deviceName?: string) =>
     ipcRenderer.invoke('docs:print-pdf-silent', base64, pages, deviceName),
+  printCombined: (base64: string, fileName: string) =>
+    ipcRenderer.invoke('docs:print-combined', base64, fileName),
   saveMergedPdf: (defaultName: string, base64Parts: string[], outPath?: string) =>
     ipcRenderer.invoke('docs:save-merged-pdf', defaultName, base64Parts, outPath),
   mergePdfBase64: (base64Parts: string[]) =>

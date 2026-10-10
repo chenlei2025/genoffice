@@ -224,16 +224,72 @@ function panelHtml(
   defaults: PrintDialogDefaults,
   pageCount: number,
   printContent: PrintContentMeta,
+  documentMode = false,
 ): string {
-  const data = JSON.stringify({ printers, defaults, pageCount, printContent }).replace(
-    /</g,
-    '\\u003c',
-  )
+  const data = JSON.stringify({
+    printers,
+    defaults,
+    pageCount,
+    printContent,
+    documentMode,
+  }).replace(/</g, '\\u003c')
   const none = printers.length === 0
   const custom = typeof defaults.pageSize === 'object' ? defaults.pageSize : { width: 8.5, height: 11 }
   const maxPage = Math.max(1, pageCount)
   const scope = printContent.scope
   const selectionDisabled = printContent.hasSelection ? '' : ' disabled'
+  const sheetSection = documentMode
+    ? ''
+    : `
+  <section class="section collapsible" id="sheet-section">
+    <button type="button" class="section-head" data-toggle="sheet-section" aria-expanded="true">
+      <span>${escapeHtml(label('appPrintSheetSection'))}</span>
+      <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="section-body">
+      <div class="s-row">
+        <div class="s-lbl">${escapeHtml(label('appPrintContent'))}</div>
+        <div class="s-ctl">
+          <select id="print-content">
+            <option value="active"${scope === 'active' ? ' selected' : ''}>${escapeHtml(label('appPrintActiveSheet'))}</option>
+            <option value="workbook"${scope === 'workbook' ? ' selected' : ''}>${escapeHtml(label('appPrintEntireWorkbook'))}</option>
+            <option value="selection"${scope === 'selection' ? ' selected' : ''}${selectionDisabled}>${escapeHtml(label('appPrintSelection'))}</option>
+          </select>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-lbl">${escapeHtml(label('appPrintAlign'))}</div>
+        <div class="s-ctl">
+          <label class="radio">
+            <input id="center-h" type="checkbox"${defaults.horizontalCentered ? ' checked' : ''}>
+            ${escapeHtml(label('appPrintCenterHorizontalShort'))}
+          </label>
+          <label class="radio">
+            <input id="center-v" type="checkbox"${defaults.verticalCentered ? ' checked' : ''}>
+            ${escapeHtml(label('appPrintCenterVerticalShort'))}
+          </label>
+        </div>
+      </div>
+      <div class="s-row scale-row">
+        <label class="scale-line">
+          <input type="radio" name="scale-mode" id="scale-mode-pct" value="scale"${defaults.fitMode === 'scale' ? ' checked' : ''}>
+          ${escapeHtml(label('appPrintScaleRatio'))}
+          <input id="scale" type="number" min="10" max="200" step="1" value="${Math.round(defaults.scale * 100)}"${defaults.fitMode === 'scale' ? '' : ' disabled'}>
+          <span>${escapeHtml(label('appPrintNormalSize'))}</span>
+        </label>
+      </div>
+      <div class="s-row scale-row">
+        <label class="scale-line">
+          <input type="radio" name="scale-mode" id="scale-mode-fit" value="fit"${defaults.fitMode === 'scale' ? '' : ' checked'}>
+          ${escapeHtml(label('appPrintAdjustTo'))}
+          <select id="fit-adjust"${defaults.fitMode === 'scale' ? ' disabled' : ''}>
+            <option value="sheet"${defaults.fitMode !== 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitSheetOnePage'))}</option>
+            <option value="width"${defaults.fitMode === 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitColumnsOnePage'))}</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </section>`
   return `<!doctype html>
 <html>
 <head>
@@ -257,8 +313,8 @@ function panelHtml(
     min-height: 0;
     overflow: hidden;
     background: Canvas;
-    border-left: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-    font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    border-left: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   .fields {
@@ -269,16 +325,23 @@ function panelHtml(
     overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 14px 12px;
+    gap: 12px;
+    padding: 16px 14px 14px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, CanvasText 26%, transparent) transparent;
+  }
+  .fields::-webkit-scrollbar { width: 8px; }
+  .fields::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, CanvasText 26%, transparent);
+    border-radius: 4px;
   }
   .title {
-    margin: 0 0 4px;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    margin: 0 2px 2px;
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
   }
-  /* macOS print panel: right-aligned labels, controls in a second column */
   .form-row {
     display: grid;
     grid-template-columns: 88px 1fr;
@@ -289,7 +352,7 @@ function panelHtml(
   .form-row > .lbl {
     text-align: right;
     font-size: 12px;
-    color: color-mix(in srgb, CanvasText 70%, transparent);
+    color: color-mix(in srgb, CanvasText 68%, transparent);
     line-height: 1.2;
   }
   .form-row > .ctl { min-width: 0; }
@@ -299,11 +362,20 @@ function panelHtml(
     font: inherit;
     width: 100%;
     box-sizing: border-box;
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+    padding: 5px 9px;
+    border-radius: 7px;
+    border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
     background: Field;
     color: FieldText;
+    outline: none;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  select:hover, input[type="number"]:hover, input[type="text"]:hover {
+    border-color: color-mix(in srgb, CanvasText 30%, transparent);
+  }
+  select:focus-visible, input[type="number"]:focus-visible, input[type="text"]:focus-visible {
+    border-color: AccentColor;
+    box-shadow: 0 0 0 3px color-mix(in srgb, AccentColor 28%, transparent);
   }
   input[type="number"].short { width: 4.2em; }
   .inline {
@@ -315,14 +387,14 @@ function panelHtml(
   .pages {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 7px;
   }
   .radio {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .radio input { margin: 0; accent-color: AccentColor; }
   .orient {
@@ -334,58 +406,83 @@ function panelHtml(
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 8px 4px 6px;
-    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-    border-radius: 8px;
+    gap: 5px;
+    padding: 9px 4px 7px;
+    border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+    border-radius: 9px;
     cursor: pointer;
     background: Field;
     color: FieldText;
     font-size: 11px;
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  }
+  .orient label:hover {
+    border-color: color-mix(in srgb, CanvasText 28%, transparent);
   }
   .orient label:has(input:checked) {
     border-color: AccentColor;
-    background: color-mix(in srgb, AccentColor 16%, Field);
+    background: color-mix(in srgb, AccentColor 14%, Field);
+    box-shadow: 0 0 0 1px color-mix(in srgb, AccentColor 35%, transparent);
   }
   .orient input { position: absolute; opacity: 0; pointer-events: none; }
   .orient svg { display: block; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .hint { margin: 0; font-size: 11px; opacity: 0.7; }
+  .hint {
+    margin: 0 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: color-mix(in srgb, CanvasText 62%, transparent);
+  }
   .actions {
     flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 16px 14px;
-    border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-    background: Canvas;
+    padding: 12px 14px 14px;
+    border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+    background: color-mix(in srgb, CanvasText 3%, Canvas);
   }
   .actions-end { display: flex; gap: 8px; margin-left: auto; }
   button {
     font: inherit;
     font-size: 13px;
-    padding: 5px 14px;
-    border-radius: 6px;
-    border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
     background: Field;
     color: FieldText;
     cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  }
+  button:hover:not(:disabled) {
+    background: color-mix(in srgb, CanvasText 6%, Field);
+    border-color: color-mix(in srgb, CanvasText 28%, transparent);
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, AccentColor 28%, transparent);
   }
   button.primary {
     background: AccentColor;
     color: AccentColorText;
     border-color: transparent;
-    min-width: 72px;
+    min-width: 76px;
+    font-weight: 600;
+  }
+  button.primary:hover:not(:disabled) {
+    background: color-mix(in srgb, CanvasText 12%, AccentColor);
+    border-color: transparent;
   }
   button:disabled { opacity: 0.45; cursor: default; }
-  button.pdf { font-weight: 500; }
-  /* Sheet + Layout + Paper Handling panes (WPS / system accessory) */
+  button.pdf { font-weight: 550; }
   .section {
-    margin-top: 4px;
-    border-radius: 10px;
-    border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-    background: color-mix(in srgb, CanvasText 5%, Canvas);
+    margin-top: 0;
+    border-radius: 11px;
+    border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+    background: color-mix(in srgb, CanvasText 4%, Canvas);
+    box-shadow: 0 1px 2px color-mix(in srgb, CanvasText 6%, transparent);
     flex: none;
+    overflow: hidden;
   }
   .section > .section-head {
     margin: 0;
@@ -394,32 +491,34 @@ function panelHtml(
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 9px 12px 7px;
+    padding: 10px 12px 9px;
     font: inherit;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 650;
+    letter-spacing: 0.01em;
     color: inherit;
     background: transparent;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-    border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+    border-radius: 0;
     cursor: pointer;
     text-align: left;
     box-sizing: border-box;
+    transition: background 0.12s ease;
   }
   .section > .section-head:hover {
-    background: color-mix(in srgb, CanvasText 6%, transparent);
+    background: color-mix(in srgb, CanvasText 5%, transparent);
   }
   .section .chev {
     flex: none;
     width: 12px;
     height: 12px;
-    opacity: 0.65;
-    transition: transform 0.15s ease;
+    opacity: 0.55;
+    transition: transform 0.16s ease, opacity 0.12s ease;
   }
+  .section > .section-head:hover .chev { opacity: 0.8; }
   .section.collapsed > .section-head {
     border-bottom-color: transparent;
-    border-radius: 10px;
   }
   .section.collapsed > .section-head .chev {
     transform: rotate(-90deg);
@@ -433,8 +532,8 @@ function panelHtml(
     justify-content: space-between;
     gap: 10px;
     padding: 9px 12px;
-    border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
-    min-height: 34px;
+    border-bottom: 1px solid color-mix(in srgb, CanvasText 8%, transparent);
+    min-height: 36px;
     box-sizing: border-box;
   }
   .section .s-row:last-child { border-bottom: 0; }
@@ -445,7 +544,7 @@ function panelHtml(
     max-width: 58%;
     font-size: 12px;
     line-height: 1.35;
-    color: color-mix(in srgb, CanvasText 78%, transparent);
+    color: color-mix(in srgb, CanvasText 76%, transparent);
     white-space: normal;
     overflow-wrap: break-word;
   }
@@ -495,7 +594,6 @@ function panelHtml(
     min-width: 5.5em;
     flex: none;
     padding-inline: 6px 4px;
-    /* Keep spinner from eating into the typed digits. */
     appearance: textfield;
     -moz-appearance: textfield;
   }
@@ -511,8 +609,8 @@ function panelHtml(
   }
   .dir-group {
     display: inline-flex;
-    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-    border-radius: 7px;
+    border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+    border-radius: 8px;
     overflow: hidden;
     background: Field;
   }
@@ -523,11 +621,15 @@ function panelHtml(
     width: 34px;
     height: 28px;
     cursor: pointer;
-    border-right: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+    border-right: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+    transition: background 0.12s ease;
   }
   .dir-group label:last-child { border-right: 0; }
+  .dir-group label:hover {
+    background: color-mix(in srgb, CanvasText 5%, Field);
+  }
   .dir-group label:has(input:checked) {
-    background: color-mix(in srgb, AccentColor 22%, Field);
+    background: color-mix(in srgb, AccentColor 20%, Field);
   }
   .dir-group input { position: absolute; opacity: 0; pointer-events: none; }
   .dir-group svg { display: block; opacity: 0.85; }
@@ -536,11 +638,12 @@ function panelHtml(
     width: 40px;
     height: 22px;
     border-radius: 11px;
-    background: color-mix(in srgb, CanvasText 28%, transparent);
+    background: color-mix(in srgb, CanvasText 26%, transparent);
     border: 0;
     position: relative;
     cursor: pointer;
     flex: none;
+    transition: background 0.14s ease;
   }
   .toggle::after {
     content: '';
@@ -551,7 +654,8 @@ function panelHtml(
     height: 18px;
     border-radius: 50%;
     background: Canvas;
-    transition: left 0.12s ease;
+    box-shadow: 0 1px 2px color-mix(in srgb, CanvasText 25%, transparent);
+    transition: left 0.14s ease;
   }
   .toggle:checked { background: AccentColor; }
   .toggle:checked::after { left: 20px; }
@@ -675,55 +779,7 @@ function panelHtml(
     </div>
   </section>
 
-  <section class="section collapsible" id="sheet-section">
-    <button type="button" class="section-head" data-toggle="sheet-section" aria-expanded="true">
-      <span>${escapeHtml(label('appPrintSheetSection'))}</span>
-      <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-    <div class="section-body">
-      <div class="s-row">
-        <div class="s-lbl">${escapeHtml(label('appPrintContent'))}</div>
-        <div class="s-ctl">
-          <select id="print-content">
-            <option value="active"${scope === 'active' ? ' selected' : ''}>${escapeHtml(label('appPrintActiveSheet'))}</option>
-            <option value="workbook"${scope === 'workbook' ? ' selected' : ''}>${escapeHtml(label('appPrintEntireWorkbook'))}</option>
-            <option value="selection"${scope === 'selection' ? ' selected' : ''}${selectionDisabled}>${escapeHtml(label('appPrintSelection'))}</option>
-          </select>
-        </div>
-      </div>
-      <div class="s-row">
-        <div class="s-lbl">${escapeHtml(label('appPrintAlign'))}</div>
-        <div class="s-ctl">
-          <label class="radio">
-            <input id="center-h" type="checkbox"${defaults.horizontalCentered ? ' checked' : ''}>
-            ${escapeHtml(label('appPrintCenterHorizontalShort'))}
-          </label>
-          <label class="radio">
-            <input id="center-v" type="checkbox"${defaults.verticalCentered ? ' checked' : ''}>
-            ${escapeHtml(label('appPrintCenterVerticalShort'))}
-          </label>
-        </div>
-      </div>
-      <div class="s-row scale-row">
-        <label class="scale-line">
-          <input type="radio" name="scale-mode" id="scale-mode-pct" value="scale"${defaults.fitMode === 'scale' ? ' checked' : ''}>
-          ${escapeHtml(label('appPrintScaleRatio'))}
-          <input id="scale" type="number" min="10" max="200" step="1" value="${Math.round(defaults.scale * 100)}"${defaults.fitMode === 'scale' ? '' : ' disabled'}>
-          <span>${escapeHtml(label('appPrintNormalSize'))}</span>
-        </label>
-      </div>
-      <div class="s-row scale-row">
-        <label class="scale-line">
-          <input type="radio" name="scale-mode" id="scale-mode-fit" value="fit"${defaults.fitMode === 'scale' ? '' : ' checked'}>
-          ${escapeHtml(label('appPrintAdjustTo'))}
-          <select id="fit-adjust"${defaults.fitMode === 'scale' ? ' disabled' : ''}>
-            <option value="sheet"${defaults.fitMode !== 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitSheetOnePage'))}</option>
-            <option value="width"${defaults.fitMode === 'width' ? ' selected' : ''}>${escapeHtml(label('appPrintFitColumnsOnePage'))}</option>
-          </select>
-        </label>
-      </div>
-    </div>
-  </section>
+  ${sheetSection}
 
   <section class="section collapsible" id="layout-section">
     <button type="button" class="section-head" data-toggle="layout-section" aria-expanded="true">
@@ -895,7 +951,7 @@ function panelHtml(
   syncPrinterMeta()
   const printContent = document.getElementById('print-content')
   let contentBusy = false
-  printContent.addEventListener('change', async () => {
+  if (printContent) printContent.addEventListener('change', async () => {
     if (!window.printDialog || !window.printDialog.setContent || contentBusy) return
     const scope = printContent.value
     contentBusy = true
@@ -961,19 +1017,25 @@ function panelHtml(
     (event) => { event.stopPropagation() },
     { passive: true },
   )
-  const num = (id) => Number(document.getElementById(id).value)
+  const num = (id) => {
+    const el = document.getElementById(id)
+    return el ? Number(el.value) : 0
+  }
   const scaleInput = document.getElementById('scale')
   const fitAdjust = document.getElementById('fit-adjust')
   const scaleModePct = document.getElementById('scale-mode-pct')
   const scaleModeFit = document.getElementById('scale-mode-fit')
   const syncScaleMode = () => {
+    if (!scaleModePct || !scaleInput || !fitAdjust) return
     const pct = scaleModePct.checked
     scaleInput.disabled = !pct
     fitAdjust.disabled = pct
   }
-  scaleModePct.onchange = syncScaleMode
-  scaleModeFit.onchange = syncScaleMode
-  syncScaleMode()
+  if (scaleModePct && scaleModeFit) {
+    scaleModePct.onchange = syncScaleMode
+    scaleModeFit.onchange = syncScaleMode
+    syncScaleMode()
+  }
   const scaleToFit = document.getElementById('scale-to-fit')
   const destPaper = document.getElementById('dest-paper')
   const scaleDownOnly = document.getElementById('scale-down-only')
@@ -1001,8 +1063,8 @@ function panelHtml(
     return from + '-' + to
   }
   const currentFitMode = () => {
-    if (scaleModePct.checked) return 'scale'
-    return fitAdjust.value === 'width' ? 'width' : 'sheet'
+    if (!scaleModePct || scaleModePct.checked) return 'scale'
+    return fitAdjust && fitAdjust.value === 'width' ? 'width' : 'sheet'
   }
   const layoutDirection = () => {
     const el = document.querySelector('input[name="layout-dir"]:checked')
@@ -1013,17 +1075,20 @@ function panelHtml(
     : paper.value
   const currentLayout = () => {
     const d = data.defaults
+    const centerH = document.getElementById('center-h')
+    const centerV = document.getElementById('center-v')
     return {
       landscape: document.getElementById('orient-landscape').checked,
       pageSize: scaleToFit.checked ? destPaper.value : sourcePageSize(),
       margins: d.margins,
-      scale: (Math.round(num('scale')) || 100) / 100,
+      scale: (Math.round(num('scale')) || Math.round(d.scale * 100) || 100) / 100,
       fitMode: currentFitMode(),
-      horizontalCentered: document.getElementById('center-h').checked,
-      verticalCentered: document.getElementById('center-v').checked,
+      horizontalCentered: centerH ? centerH.checked : !!d.horizontalCentered,
+      verticalCentered: centerV ? centerV.checked : !!d.verticalCentered,
     }
   }
   const publishLayout = () => {
+    if (data.documentMode) return
     if (window.printDialog && window.printDialog.layout) window.printDialog.layout(currentLayout())
   }
   for (const id of [
@@ -1032,6 +1097,7 @@ function panelHtml(
     'dest-paper',
   ]) {
     const el = document.getElementById(id)
+    if (!el) continue
     el.addEventListener('input', publishLayout)
     el.addEventListener('change', publishLayout)
   }
@@ -1187,7 +1253,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
       return
     }
     const h = first.offsetHeight
-    const gap = 12
+    const gap = 14
     const base = first.offsetTop
     if (h > 0) {
       cardMetrics = pageSpecs.map((_, i) => ({
@@ -1802,18 +1868,31 @@ async function freezeVisiblePreviewPages(
   }
 }
 
+export type PrintDialogMode = 'workbook' | 'document'
+
 export async function openCombinedPrintDialog(args: {
   parent: BrowserWindow | null
-  htmlPath: string
   workDir: string
   settings: PrintDialogDefaults
   /// Suggested PDF file name when the destination is Save as PDF.
   fileName: string
+  /// Workbook HTML preview (required when mode is `workbook`).
+  htmlPath?: string
+  /// Pre-built PDF preview/job (required when mode is `document`, e.g. Word).
+  pdfPath?: string
+  mode?: PrintDialogMode
   printContent?: PrintContentMeta
   rebuildContent?: PrintContentRebuild
   sourceRequest?: WorkbookExportPdfRequest
   renderPdf?: PrintPdfRenderer
 }): Promise<WorkbookPrintResult> {
+  const documentMode = args.mode === 'document' || Boolean(args.pdfPath && !args.htmlPath)
+  if (documentMode && !args.pdfPath) {
+    return { ok: false, error: label('appPrintFailed') }
+  }
+  if (!documentMode && !args.htmlPath) {
+    return { ok: false, error: label('appPrintFailed') }
+  }
   const channel = `sheets:print-dialog:${randomUUID()}`
   const layoutChannel = `sheets:print-dialog-layout:${randomUUID()}`
   const contentChannel = `sheets:print-dialog-content:${randomUUID()}`
@@ -1827,6 +1906,7 @@ export async function openCombinedPrintDialog(args: {
   }
   let liveSettings = args.settings
   let liveRequest = args.sourceRequest
+  let documentPageCount = 1
 
   const parent = args.parent && !args.parent.isDestroyed() ? args.parent : undefined
   const win = new BrowserWindow({
@@ -1840,8 +1920,11 @@ export async function openCombinedPrintDialog(args: {
     ...(parent ? { parent, modal: true } : {}),
     webPreferences: { sandbox: true, preload: preloadPath },
   })
+  /// Document mode loads a PDF into the left pane; Chromium's viewer needs
+  /// `plugins: true`. Without it, `loadFile(*.pdf)` can hang forever and the
+  /// dialog never reaches `show()` (Word print stuck on "Generating preview…").
   const preview = new WebContentsView({
-    webPreferences: { sandbox: true },
+    webPreferences: { sandbox: true, plugins: documentMode },
   })
   win.contentView.addChildView(preview)
 
@@ -1875,19 +1958,21 @@ export async function openCombinedPrintDialog(args: {
   let fittedPage = ''
   const freezeGen = { current: 0 }
   let freezeBusy = false
-  const freezeTimer = setInterval(() => {
-    if (freezeBusy || preview.webContents.isDestroyed()) return
-    const mine = freezeGen.current
-    freezeBusy = true
-    void freezeVisiblePreviewPages(preview, freezeGen, mine).finally(() => {
-      freezeBusy = false
-    })
-  }, 120)
+  const freezeTimer = documentMode
+    ? undefined
+    : setInterval(() => {
+        if (freezeBusy || preview.webContents.isDestroyed()) return
+        const mine = freezeGen.current
+        freezeBusy = true
+        void freezeVisiblePreviewPages(preview, freezeGen, mine).finally(() => {
+          freezeBusy = false
+        })
+      }, 120)
   /// Write margins, scale, and alignment onto the page itself. Inline styles
   /// beat the baked stylesheet so each keystroke moves the sheet inside the
   /// paper card without refitting (which would reset the pinch zoom).
   const applyPreviewLayout = (layout: PreviewLayout): Promise<void> => {
-    if (preview.webContents.isDestroyed()) return Promise.resolve()
+    if (documentMode || preview.webContents.isDestroyed()) return Promise.resolve()
     const patch = previewLayoutPatch(layout)
     const pageKey = `${patch.pageW}x${patch.pageH}`
     const gen = ++layoutGen
@@ -1976,7 +2061,7 @@ export async function openCombinedPrintDialog(args: {
       if (settled) return
       settled = true
       freezeGen.current += 1
-      clearInterval(freezeTimer)
+      if (freezeTimer !== undefined) clearInterval(freezeTimer)
       ipcMain.removeListener(channel, onChoice)
       ipcMain.removeListener(layoutChannel, onLayout)
       ipcMain.removeHandler(contentChannel)
@@ -2002,6 +2087,7 @@ export async function openCombinedPrintDialog(args: {
     ipcMain.on(channel, onChoice)
     ipcMain.on(layoutChannel, onLayout)
     ipcMain.handle(contentChannel, async (_event, scopeRaw: unknown) => {
+      if (documentMode) return { error: label('appPrintFailed') }
       if (
         scopeRaw !== 'active' &&
         scopeRaw !== 'workbook' &&
@@ -2009,7 +2095,7 @@ export async function openCombinedPrintDialog(args: {
       ) {
         return { error: label('appPrintFailed') }
       }
-      if (!args.rebuildContent) return { error: label('appPrintFailed') }
+      if (!args.rebuildContent || !args.htmlPath) return { error: label('appPrintFailed') }
       try {
         const rebuilt = await args.rebuildContent(scopeRaw)
         if ('error' in rebuilt) return { error: rebuilt.error }
@@ -2029,20 +2115,48 @@ export async function openCombinedPrintDialog(args: {
     win.once('closed', () => finish(null))
     void (async () => {
       try {
-        const listed = await preview.webContents.getPrintersAsync()
+        /// Prefer the parent window's printer list — a blank WebContentsView
+        /// has stalled getPrintersAsync on some macOS setups.
+        const printerSource =
+          parent && !parent.isDestroyed() ? parent.webContents : preview.webContents
+        const listed = await printerSource.getPrintersAsync()
         const printers: ListedPrinter[] = listed.map(listedPrinterOf)
         names = new Set(printers.map((printer) => printer.name))
-        await preview.webContents.loadFile(args.htmlPath)
-        await preview.webContents.executeJavaScript(PREVIEW_FIT_SCRIPT)
-        await applyPreviewLayout(liveSettings)
-        layout()
-        const { pageCount } = await previewPageInfo(preview)
-        await writeFile(panelPath, panelHtml(printers, liveSettings, pageCount, printContentMeta), 'utf8')
+        let pageCount = 1
+        if (documentMode && args.pdfPath) {
+          const { PDFDocument } = await import('pdf-lib')
+          const bytes = await readFile(args.pdfPath)
+          const pdf = await PDFDocument.load(bytes)
+          documentPageCount = Math.max(1, pdf.getPageCount())
+          pageCount = documentPageCount
+        } else if (args.htmlPath) {
+          await preview.webContents.loadFile(args.htmlPath)
+          await preview.webContents.executeJavaScript(PREVIEW_FIT_SCRIPT)
+          await applyPreviewLayout(liveSettings)
+          layout()
+          pageCount = (await previewPageInfo(preview)).pageCount
+        }
+        await writeFile(
+          panelPath,
+          panelHtml(printers, liveSettings, pageCount, printContentMeta, documentMode),
+          'utf8',
+        )
         await win.loadFile(panelPath)
         layout()
         if (!win.isDestroyed()) {
           win.show()
           win.focus()
+          layout()
+        }
+        /// Load the PDF after the shell is visible so a stuck Chromium PDF
+        /// viewer cannot block the dialog from appearing. `#toolbar=0` hides
+        /// the native viewer chrome (download / print / ⋮) — the right sidebar
+        /// already owns those actions for Word print.
+        if (documentMode && args.pdfPath && !preview.webContents.isDestroyed()) {
+          await Promise.race([
+            preview.webContents.loadFile(args.pdfPath, { hash: 'toolbar=0' }),
+            new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+          ])
           layout()
         }
       } catch (error: unknown) {
@@ -2057,7 +2171,10 @@ export async function openCombinedPrintDialog(args: {
   }
 
   try {
-    const { pageCount, currentPage } = await previewPageInfo(preview)
+    const pageInfo = documentMode
+      ? { pageCount: documentPageCount, currentPage: 1 }
+      : await previewPageInfo(preview)
+    const { pageCount, currentPage } = pageInfo
     const ranged = resolvePrintPageList(choice, pageCount, currentPage)
     if (ranged === null) {
       if (!win.isDestroyed()) win.destroy()
@@ -2075,7 +2192,7 @@ export async function openCombinedPrintDialog(args: {
     }
     const scaledChoice: PrintDialogChoice = {
       ...choice,
-      scale: await resolvePrintScale(choice),
+      scale: documentMode ? choice.scale : await resolvePrintScale(choice),
       ...(pageList ? { pageList } : {}),
     }
     if (isSaveAsPdfDevice(choice.deviceName)) {
@@ -2090,6 +2207,15 @@ export async function openCombinedPrintDialog(args: {
       })
       if (!win.isDestroyed()) await closePrintWindow(win)
       if (selection.canceled || !selection.filePath) return { ok: false }
+      if (documentMode && args.pdfPath) {
+        let pdf: Buffer = await readFile(args.pdfPath)
+        if (scaledChoice.pageList) {
+          pdf = Buffer.from(await subsetPdfPages(pdf, scaledChoice.pageList))
+        }
+        await atomicWriteFile(selection.filePath, pdf)
+        return { ok: true, path: selection.filePath }
+      }
+      if (!args.htmlPath) return { ok: false, error: label('appPrintFailed') }
       return await savePdfFromPrintDialog({
         htmlPath: args.htmlPath,
         workDir: args.workDir,
@@ -2101,6 +2227,18 @@ export async function openCombinedPrintDialog(args: {
     }
 
     if (!win.isDestroyed()) await closePrintWindow(win)
+    if (documentMode && args.pdfPath) {
+      let pdf: Buffer = await readFile(args.pdfPath)
+      if (scaledChoice.pageList) {
+        pdf = Buffer.from(await subsetPdfPages(pdf, scaledChoice.pageList))
+      }
+      return await printPdfBytesSilent(
+        pdf,
+        printOptionsFromDialog(scaledChoice),
+        args.workDir,
+      )
+    }
+    if (!args.htmlPath) return { ok: false, error: label('appPrintFailed') }
     return await printFromPrintDialog({
       htmlPath: args.htmlPath,
       workDir: args.workDir,
@@ -2112,4 +2250,31 @@ export async function openCombinedPrintDialog(args: {
     if (!win.isDestroyed()) win.destroy()
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/// Word / document print: same combined dialog as Sheets, left pane loads a
+/// pre-built PDF (pagination already done by the editor).
+export async function openDocumentPrintDialog(args: {
+  parent: BrowserWindow | null
+  pdfPath: string
+  workDir: string
+  fileName: string
+  settings?: PrintDialogDefaults
+}): Promise<WorkbookPrintResult> {
+  return openCombinedPrintDialog({
+    parent: args.parent,
+    workDir: args.workDir,
+    fileName: args.fileName,
+    pdfPath: args.pdfPath,
+    mode: 'document',
+    settings: args.settings ?? {
+      landscape: false,
+      pageSize: 'A4',
+      margins: { top: 0.75, bottom: 0.75, left: 0.7, right: 0.7 },
+      scale: 1,
+      fitMode: 'scale',
+      horizontalCentered: false,
+      verticalCentered: false,
+    },
+  })
 }
