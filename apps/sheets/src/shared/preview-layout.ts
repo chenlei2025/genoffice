@@ -90,8 +90,8 @@ export function previewLayoutCss(layout: PreviewLayout): string {
 }
 .sheet { position: relative; width: max-content; flex: none; }
 @media screen {
-  /* macOS print-dialog mat: dark chrome around white paper cards. */
-  html, body { margin: 0; height: 100%; background: #1e1e20; color: #f5f5f7; }
+  /* Match the print dialog sidebar (Canvas) so left/right share one mat. */
+  html, body { margin: 0; height: 100%; background: Canvas; color: CanvasText; }
   #preview-fit {
     height: 100%;
     overflow: hidden;
@@ -99,7 +99,7 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     flex-direction: column;
     align-items: stretch;
     box-sizing: border-box;
-    background: #1e1e20;
+    background: Canvas;
   }
   #preview-scroll {
     flex: 1;
@@ -112,14 +112,14 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     overscroll-behavior: contain;
     overflow-anchor: none;
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, #fff 28%, transparent) transparent;
+    scrollbar-color: color-mix(in srgb, CanvasText 28%, transparent) transparent;
     /* Paint-isolate the scroller (no size containment — that can collapse scrollHeight). */
     contain: layout paint style;
     transform: translateZ(0);
   }
   #preview-scroll::-webkit-scrollbar { width: 8px; }
   #preview-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, #fff 28%, transparent);
+    background: color-mix(in srgb, CanvasText 28%, transparent);
     border-radius: 4px;
   }
   #preview-pages {
@@ -165,9 +165,9 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     padding: 7px 12px 10px;
     font: 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     letter-spacing: 0.01em;
-    color: color-mix(in srgb, #fff 78%, transparent);
-    background: color-mix(in srgb, #1e1e20 92%, transparent);
-    border-top: 1px solid color-mix(in srgb, #fff 8%, transparent);
+    color: color-mix(in srgb, CanvasText 70%, transparent);
+    background: Canvas;
+    border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
     user-select: none;
   }
   .area {
