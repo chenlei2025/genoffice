@@ -30,6 +30,7 @@ import {
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
+import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { buildExportImagePaths, hasValidExportPageNumbers } from './export-images'
 import type {
   ExportImagesRequest,
@@ -923,6 +924,23 @@ function registerPdfIpc(): void {
     }
     const buf = await readFile(path)
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  })
+
+  ipcMain.handle(PDF_CHANNELS.printDocument, async (e, path: unknown) => {
+    if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
+      return { ok: false, error: 'pdf: path not granted to this view' }
+    }
+    const owner = BrowserWindow.fromWebContents(e.sender)
+    try {
+      const pdf = await readFile(path)
+      return await openDocumentPrintDialogFromPdf({
+        parent: owner && !owner.isDestroyed() ? owner : null,
+        pdf,
+        fileName: basename(path) || 'Document.pdf',
+      })
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(

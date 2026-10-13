@@ -18,3 +18,25 @@ export function parsePrintRange(text: string, max: number): number[] | null {
   }
   return [...out].sort((x, y) => x - y)
 }
+
+/// 1-based page numbers → "1-3,5,7-8".
+export function compactPrintRange(pages: readonly number[]): string {
+  const sorted = [...new Set(pages.filter((n) => Number.isInteger(n) && n >= 1))].sort(
+    (a, b) => a - b,
+  )
+  if (sorted.length === 0) return ''
+  const parts: string[] = []
+  let start = sorted[0]!
+  let prev = sorted[0]!
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = sorted[i]!
+    if (cur === prev + 1) {
+      prev = cur
+      continue
+    }
+    parts.push(start === prev ? String(start) : `${start}-${prev}`)
+    start = prev = cur
+  }
+  parts.push(start === prev ? String(start) : `${start}-${prev}`)
+  return parts.join(',')
+}

@@ -607,6 +607,8 @@ export const ms = {
   appPrintAlign: 'Penjajaran',
   appPrintCenterHorizontal: 'Tengah mendatar',
   appPrintCenterVertical: 'Tengah menegak',
+  appPrintCenterHorizontalOff: 'Tengah mendatar dimatikan',
+  appPrintCenterVerticalOff: 'Tengah menegak dimatikan',
   appPrintSent: 'Dihantar ke pencetak.',
   appPrintCanceled: 'Cetakan dibatalkan.',
   appPrintFailed: 'Tidak dapat mencetak.',

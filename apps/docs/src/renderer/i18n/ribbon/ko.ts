@@ -67,6 +67,9 @@ export const ko = {
   ribbonSave: '저장',
   ribbonSaveAs: '다른 이름으로 저장…',
   // Home · Clipboard
+  ribbonPrint: '인쇄',
+  ribbonPrintTip: '현재 문서 인쇄',
+  ribbonGroupPrint: '인쇄',
   ribbonPaste: '붙여넣기',
   ribbonCutTip: '잘라내기 (⌘X)',
   ribbonCopyTip: '복사 (⌘C)',

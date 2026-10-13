@@ -11,7 +11,12 @@ import {
   resolvePrintPageList,
   scaleToFitFactor,
 } from '../src/main/print-options'
-import { previewLayoutCss, previewLayoutPatch } from '../src/shared/preview-layout'
+import {
+  nupCellIndex,
+  nupGridSize,
+  previewLayoutCss,
+  previewLayoutPatch,
+} from '../src/shared/preview-layout'
 import type { WorkbookExportPdfRequest } from '../src/shared/desktop-api'
 
 const REQUEST: WorkbookExportPdfRequest = {
@@ -57,7 +62,7 @@ const CHOICE = {
   scale: 1,
   fitMode: 'sheet' as const,
   horizontalCentered: true,
-  verticalCentered: false,
+  verticalCentered: true,
   pagesPerSheet: 1,
   layoutDirection: 'ltr-ttb' as const,
   pageBorder: 'none' as const,
@@ -124,6 +129,9 @@ describe('previewLayoutCss', () => {
     expect(css).toContain('--print-scale: 0.8')
     expect(css).toContain('--align-x: center')
     expect(css).toContain('--align-y: center')
+    expect(css).toContain('@page')
+    expect(css).toContain('size: 8.27in 11.69in')
+    expect(css).toContain('width: 100% !important')
   })
 
   it('turns alignment off without changing the paper size', () => {
@@ -148,12 +156,48 @@ describe('previewLayoutCss', () => {
       fitMode: 'scale',
       align: 'flex-start',
       justify: 'flex-start',
+      reverseOrientation: false,
+      flipHorizontal: false,
+      pageBorder: 'none',
+      pagesPerSheet: 1,
+      layoutDirection: 'ltr-ttb',
+      nupCols: 1,
+      nupRows: 1,
     })
+  })
+
+  it('packs Layout N-up into Chromium-style grids', () => {
+    expect(nupGridSize(2)).toEqual({ cols: 2, rows: 1 })
+    expect(nupGridSize(3)).toEqual({ cols: 2, rows: 2 })
+    expect(nupGridSize(6)).toEqual({ cols: 3, rows: 2 })
+    expect(
+      previewLayoutPatch({
+        landscape: false,
+        pageSize: 'A4',
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        scale: 1,
+        fitMode: 'scale',
+        horizontalCentered: true,
+        verticalCentered: true,
+        pagesPerSheet: 4,
+        layoutDirection: 'ttb-rtl',
+      }),
+    ).toMatchObject({
+      pagesPerSheet: 4,
+      layoutDirection: 'ttb-rtl',
+      nupCols: 2,
+      nupRows: 2,
+    })
+    expect(nupCellIndex(0, 2, 2, 'ltr-ttb')).toBe(0)
+    expect(nupCellIndex(1, 2, 2, 'ltr-ttb')).toBe(1)
+    expect(nupCellIndex(0, 2, 2, 'rtl-ttb')).toBe(1)
+    expect(nupCellIndex(1, 2, 2, 'rtl-ttb')).toBe(0)
+    expect(nupCellIndex(1, 2, 2, 'ttb-ltr')).toBe(2)
   })
 })
 
 describe('printOptionsFromDialog', () => {
-  it('silent-prints with system-dialog destination options and no extra margins', () => {
+  it('silent-prints with matching paper size and no extra margins', () => {
     expect(printOptionsFromDialog(CHOICE)).toEqual({
       silent: true,
       printBackground: true,
@@ -163,18 +207,32 @@ describe('printOptionsFromDialog', () => {
       color: false,
       duplexMode: 'longEdge',
       pagesPerSheet: 1,
+      landscape: false,
+      scaleFactor: 100,
       margins: { marginType: 'none' },
+      /// Letter portrait in microns
+      pageSize: { width: 215900, height: 279400 },
     })
+  })
+
+  it('uses already-oriented microns so landscape PDFs are not rotated again', () => {
+    expect(printOptionsFromDialog({ ...CHOICE, landscape: true, pageSize: 'A4' }).pageSize).toEqual(
+      {
+        width: Math.round(11.69 * 25400),
+        height: Math.round(8.27 * 25400),
+      },
+    )
   })
 })
 
 describe('printToPdfOptionsFromDialog', () => {
-  it('uses printToPDF units; ranges are applied by subsetting later', () => {
+  it('uses an oriented custom page size so CSS @page matches Chromium paper', () => {
     expect(printToPdfOptionsFromDialog(CHOICE)).toEqual({
       landscape: false,
-      pageSize: 'Letter',
+      pageSize: { width: 8.5, height: 11 },
       margins: { top: 1, bottom: 1, left: 0.5, right: 0.5 },
       scale: 1,
+      preferCSSPageSize: true,
       printBackground: true,
     })
   })
@@ -190,8 +248,9 @@ describe('printToPdfOptionsFromDialog', () => {
         scale: 1,
       }),
     ).toMatchObject({
-      pageSize: 'A4',
+      pageSize: { width: 8.27, height: 11.69 },
       scale: scaleToFitFactor('Letter', 'A4', false, true),
+      preferCSSPageSize: true,
     })
   })
 })
@@ -242,7 +301,7 @@ describe('requestFromPrintDialog', () => {
       }),
     ).toMatchObject({
       headerTemplate: '<div>H</div>',
-      pageSize: 'A4',
+      pageSize: { width: 8.27, height: 11.69 },
       landscape: false,
     })
   })

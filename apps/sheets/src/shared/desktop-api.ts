@@ -1294,6 +1294,8 @@ export const workbookPageSetupStateSchema = z
     margins: z.enum(['normal', 'wide', 'narrow']).optional(),
     printGridlines: z.boolean().optional(),
     printHeadings: z.boolean().optional(),
+    horizontalCentered: z.boolean().optional(),
+    verticalCentered: z.boolean().optional(),
     showGridlines: z.boolean().optional(),
     /// sheetView/@zoomScale, normal-view zoom percent.
     zoomScale: z.number().int().min(10).max(400).optional(),

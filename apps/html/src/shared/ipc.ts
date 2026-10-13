@@ -36,6 +36,7 @@ export const HTML_CHANNELS = {
   consumeHeadlessExport: 'html:consume-headless-export',
   headlessExportDone: 'html:headless-export-done',
   printRequest: 'html:print-request',
+  printDocument: 'html:print-document',
   aiGenerateImage: 'html:ai-generate-image',
   filesPick: 'html:files-pick',
   filesAdd: 'html:files-add',
@@ -182,6 +183,8 @@ export type ExportResult =
   | { ok: true; canceled: true }
   | { ok: false; error: string }
 
+export type PrintDocumentResult = { ok: true; path?: string } | { ok: false; error?: string }
+
 export interface ImageData {
   base64: string
   mime: 'image/png' | 'image/jpeg' | 'image/gif'
@@ -260,8 +263,9 @@ export interface HtmlApi {
   getPathForFile(file: File): string
   /** Shell menu export → renderer serializes and calls exportDocx/exportPdf */
   onExportRequest(handler: (format: ExportFormat) => void): () => void
-  /** Shell menu Print → renderer builds the print HTML and opens the system print dialog */
+  /** Shell menu Print → renderer serializes and opens the combined print dialog */
   onPrintRequest(handler: () => void): () => void
+  printDocument(request: ExportPdfRequest): Promise<PrintDocumentResult>
   exportDocx(request: ExportDocxRequest): Promise<ExportResult>
   exportPdf(request: ExportPdfRequest): Promise<ExportResult>
   exportHtml(request: ExportHtmlRequest): Promise<ExportResult>

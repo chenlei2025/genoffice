@@ -10,6 +10,9 @@ export type PreviewPageSize =
 
 export type PreviewFitMode = 'scale' | 'sheet' | 'width'
 
+/// N-up fill order on each physical sheet (Layout pane).
+export type PreviewLayoutDirection = 'ltr-ttb' | 'rtl-ttb' | 'ttb-ltr' | 'ttb-rtl'
+
 export interface PreviewLayout {
   landscape: boolean
   pageSize: PreviewPageSize
@@ -20,6 +23,66 @@ export interface PreviewLayout {
   fitMode: PreviewFitMode
   horizontalCentered: boolean
   verticalCentered: boolean
+  /// Layout pane toggles (live preview + print job).
+  reverseOrientation?: boolean
+  flipHorizontal?: boolean
+  pageBorder?: 'none' | 'hairline'
+  pagesPerSheet?: number
+  layoutDirection?: PreviewLayoutDirection
+}
+
+/// Chromium-supported N-up grids (1 / 2 / 4 / 6 / 9 / 16). Other values snap
+/// up to the next supported size so the preview matches typical print engines.
+export function nupGridSize(pagesPerSheet: number): { cols: number; rows: number } {
+  const n = Math.min(16, Math.max(1, Math.round(pagesPerSheet) || 1))
+  const supported = [1, 2, 4, 6, 9, 16] as const
+  const hit = supported.find((value) => value >= n) ?? 16
+  switch (hit) {
+    case 2:
+      return { cols: 2, rows: 1 }
+    case 4:
+      return { cols: 2, rows: 2 }
+    case 6:
+      return { cols: 3, rows: 2 }
+    case 9:
+      return { cols: 3, rows: 3 }
+    case 16:
+      return { cols: 4, rows: 4 }
+    default:
+      return { cols: 1, rows: 1 }
+  }
+}
+
+/// Maps fill order index → row-major cell index for the Layout direction control.
+export function nupCellIndex(
+  fillIndex: number,
+  cols: number,
+  rows: number,
+  direction: PreviewLayoutDirection,
+): number {
+  const total = cols * rows
+  if (fillIndex < 0 || fillIndex >= total || cols < 1 || rows < 1) return fillIndex
+  let row = 0
+  let col = 0
+  switch (direction) {
+    case 'rtl-ttb':
+      row = Math.floor(fillIndex / cols)
+      col = cols - 1 - (fillIndex % cols)
+      break
+    case 'ttb-ltr':
+      col = Math.floor(fillIndex / rows)
+      row = fillIndex % rows
+      break
+    case 'ttb-rtl':
+      col = cols - 1 - Math.floor(fillIndex / rows)
+      row = fillIndex % rows
+      break
+    default:
+      row = Math.floor(fillIndex / cols)
+      col = fillIndex % cols
+      break
+  }
+  return row * cols + col
 }
 
 const PAPER_INCHES: Record<(typeof PREVIEW_PAGE_SIZES)[number], { width: number; height: number }> =
@@ -47,6 +110,13 @@ export interface PreviewLayoutPatch {
   fitMode: PreviewFitMode
   align: 'center' | 'flex-start'
   justify: 'center' | 'flex-start'
+  reverseOrientation: boolean
+  flipHorizontal: boolean
+  pageBorder: 'none' | 'hairline'
+  pagesPerSheet: number
+  layoutDirection: PreviewLayoutDirection
+  nupCols: number
+  nupRows: number
 }
 
 /// Numbers the preview writes onto the page as CSS variables. Inline updates
@@ -56,6 +126,13 @@ export function previewLayoutPatch(layout: PreviewLayout): PreviewLayoutPatch {
   const paper = typeof layout.pageSize === 'string' ? PAPER_INCHES[layout.pageSize] : layout.pageSize
   const across = layout.landscape ? paper.height : paper.width
   const down = layout.landscape ? paper.width : paper.height
+  const direction: PreviewLayoutDirection =
+    layout.layoutDirection === 'rtl-ttb' ||
+    layout.layoutDirection === 'ttb-ltr' ||
+    layout.layoutDirection === 'ttb-rtl'
+      ? layout.layoutDirection
+      : 'ltr-ttb'
+  const grid = nupGridSize(layout.pagesPerSheet ?? 1)
   return {
     pageW: round3(across),
     pageH: round3(down),
@@ -67,6 +144,13 @@ export function previewLayoutPatch(layout: PreviewLayout): PreviewLayoutPatch {
     fitMode: layout.fitMode,
     align: layout.horizontalCentered ? 'center' : 'flex-start',
     justify: layout.verticalCentered ? 'center' : 'flex-start',
+    reverseOrientation: layout.reverseOrientation === true,
+    flipHorizontal: layout.flipHorizontal === true,
+    pageBorder: layout.pageBorder === 'hairline' ? 'hairline' : 'none',
+    pagesPerSheet: grid.cols * grid.rows,
+    layoutDirection: direction,
+    nupCols: grid.cols,
+    nupRows: grid.rows,
   }
 }
 
@@ -129,6 +213,38 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     align-items: center;
     /* No transform on the stack — a scaled ancestor disables content-visibility
        skipping and forces one giant layer while scrolling. */
+  }
+  .preview-sheet {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .preview-sheet.is-off .preview-card-slot {
+    opacity: 0.42;
+  }
+  .preview-page-picks {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .preview-page-pick {
+    min-width: 28px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+    background: color-mix(in srgb, CanvasText 8%, Canvas);
+    color: CanvasText;
+    font: 11px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+  .preview-page-pick[aria-pressed="true"] {
+    background: AccentColor;
+    border-color: AccentColor;
+    color: Canvas;
   }
   .preview-card-slot {
     flex: none;
@@ -202,6 +318,11 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     backface-visibility: hidden;
   }
 }
+/* Prefer this box via printToPDF preferCSSPageSize — matches the screen card. */
+@page {
+  size: ${patch.pageW}in ${patch.pageH}in;
+  margin: 0;
+}
 @media print {
   /* White paper under cells — transparent pages rasterize as black in pdf.js. */
   html, body, #preview-fit, #preview-scroll, #preview-pages {
@@ -211,30 +332,38 @@ export function previewLayoutCss(layout: PreviewLayout): string {
     display: block !important;
     overflow: visible !important;
   }
-  #preview-page-label, .preview-card-slot { display: contents !important; }
+  #preview-page-label, .preview-card-slot, .preview-sheet { display: contents !important; }
+  .preview-page-picks { display: none !important; }
   .preview-card-bitmap { display: none !important; }
   .page-clip {
     display: block !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     height: auto !important;
+    max-width: 100% !important;
   }
   .sheet {
     zoom: 1 !important;
     transform: none !important;
     position: static !important;
     top: auto !important;
+    max-width: 100% !important;
   }
   .area {
     position: static !important;
     background: #fff !important;
-    width: auto !important;
+    /* Fill Chromium's margin box (same width the preview card content uses).
+       width:auto let wide sheets overflow and get clipped on both sides when
+       centered; 100% + hidden matches the screen overflow:hidden card. */
+    width: 100% !important;
+    max-width: 100% !important;
     height: auto !important;
     min-height: var(--v-min) !important;
     padding: 0 !important;
     margin: 0 !important;
     border: 0 !important;
     box-shadow: none !important;
-    overflow: visible !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: var(--align-y) !important;

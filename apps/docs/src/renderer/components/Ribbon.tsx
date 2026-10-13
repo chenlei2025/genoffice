@@ -191,6 +191,7 @@ import {
   IconPasteMerge,
   IconPasteSource,
   IconPasteText,
+  IconPrint,
   IconPilcrow,
   IconFlipH,
   IconFlipV,
@@ -257,6 +258,8 @@ interface RibbonProps {
   /** Home ▸ Editing: open the Find panel on its Find / Replace tab */
   onFind?: () => void
   onReplace?: () => void
+  /** Home ▸ Print: open the print dialog (before Clipboard, matching Sheets) */
+  onPrint?: () => void
   onOpen: () => void
   onSave: () => void
   onSaveAs: () => void
@@ -696,6 +699,7 @@ function RibbonInner({
   onReplace,
   styles,
   docDefaults,
+  onPrint,
   onOpen,
   onSave,
   onSaveAs,
@@ -3060,6 +3064,27 @@ function RibbonInner({
                 </button>
               </div>
               <div className="ribbon-group-label">Genspark AI</div>
+            </div>
+
+            <div className="ribbon-sep" />
+
+            {/* ---- Print (before Clipboard, matching Sheets) ---- */}
+            <div className="ribbon-group">
+              <div className="ribbon-group-items">
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc || !onPrint}
+                  data-tip={t('ribbonPrintTip')}
+                  aria-label={t('ribbonPrint')}
+                  onClick={() => onPrint?.()}
+                >
+                  <span className="rb-big-icon">
+                    <IconPrint size={28} />
+                  </span>
+                  <span>{t('ribbonPrint')}</span>
+                </button>
+              </div>
+              <div className="ribbon-group-label">{t('ribbonGroupPrint')}</div>
             </div>
 
             <div className="ribbon-sep" />

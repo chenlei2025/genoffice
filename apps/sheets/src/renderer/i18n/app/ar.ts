@@ -585,6 +585,8 @@ export const ar = {
   appPrintAlign: 'محاذاة',
   appPrintCenterHorizontal: 'توسيط أفقي',
   appPrintCenterVertical: 'توسيط عمودي',
+  appPrintCenterHorizontalOff: 'إلغاء التوسيط الأفقي',
+  appPrintCenterVerticalOff: 'إلغاء التوسيط العمودي',
   appPrintSent: 'تم الإرسال إلى الطابعة.',
   appPrintCanceled: 'تم إلغاء الطباعة.',
   appPrintFailed: 'يتعذر الطباعة.',

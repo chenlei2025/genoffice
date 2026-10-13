@@ -638,6 +638,8 @@ export const ja = {
   appPrintAlign: '配置',
   appPrintCenterHorizontal: '水平方向中央',
   appPrintCenterVertical: '垂直方向中央',
+  appPrintCenterHorizontalOff: '水平方向の中央揃えを解除',
+  appPrintCenterVerticalOff: '垂直方向の中央揃えを解除',
   appPrintSent: 'プリンターに送信しました。',
   appPrintCanceled: '印刷をキャンセルしました。',
   appPrintFailed: '印刷できません。',

@@ -591,6 +591,8 @@ export const en = {
   appPrintAlign: 'Alignment',
   appPrintCenterHorizontal: 'Center horizontally',
   appPrintCenterVertical: 'Center vertically',
+  appPrintCenterHorizontalOff: 'Horizontal centering off',
+  appPrintCenterVerticalOff: 'Vertical centering off',
   appPrintSent: 'Sent to the printer.',
   appPrintCanceled: 'Printing canceled.',
   appPrintFailed: 'Unable to print.',

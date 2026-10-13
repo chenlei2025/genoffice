@@ -68,6 +68,7 @@ export async function openSource(
           return () => window.removeEventListener('test:export', exportFile)
         },
         onPrintRequest: () => off,
+        printDocument: async () => ({ ok: true }),
         exportDocx: async () => ({ ok: false, error: 'not used in renderer coverage' }),
         exportPdf: async () => ({ ok: false, error: 'not used in renderer coverage' }),
         onChromePressed: () => off,

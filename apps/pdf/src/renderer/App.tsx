@@ -72,7 +72,6 @@ import { LinkLayer } from './LinkLayer'
 import { OutlinePanel } from './OutlinePanel'
 import type { OutlineNode } from './OutlinePanel'
 import { buildHeadingOutline, remapOutlinePages } from './heading-outline'
-import { printPdf } from './print'
 import { PasswordDialog } from './PasswordDialog'
 import { PropertiesDialog } from './PropertiesDialog'
 import { SignatureDialog, fileToCanvas } from './SignatureDialog'
@@ -842,10 +841,6 @@ export default function App() {
   const [replaceInvalid, setReplaceInvalid] = useState(false)
   const [pageSizeDlg, setPageSizeDlg] = useState(false)
   const [splitPagesDlg, setSplitPagesDlg] = useState(false)
-  const [printDlg, setPrintDlg] = useState(false)
-  const [printMode, setPrintMode] = useState<'all' | 'current' | 'custom'>('all')
-  const [printInput, setPrintInput] = useState('')
-  const [printInvalid, setPrintInvalid] = useState(false)
   /** Page-crop dialog: rendered page bitmap + which page it shows */
   const [pageCropDlg, setPageCropDlg] = useState<{ png: string; origIdx: number } | null>(null)
   const [cropAllPages, setCropAllPages] = useState(false)
@@ -5217,30 +5212,23 @@ export default function App() {
     void cropPagesOnDisk(pages, crop)
   }
 
-  // currentPage only tracks scroll, so it can outlive a page deletion
-  const printCurrentPage = Math.max(1, Math.min(currentPage, pageCount))
   const openPrintDlg = () => {
-    setPrintMode('all')
-    setPrintInput(String(printCurrentPage))
-    setPrintInvalid(false)
-    setPrintDlg(true)
+    void printDoc()
   }
 
-  /** Print: save first (markups/forms/page ops all into the file), then reload from the file to render, avoiding a destroyed old doc */
+  /** Flush markups then open the combined print dialog (preview + page pick). */
   // Synchronous re-entry guard: the menu accelerator and the renderer's own ⌘P can both
   // fire, and the `printing` state only updates after the async flush has started
   const printBusyRef = useRef(false)
-  // `pages` are 1-based file pages; the flush compacts the file to the visible
-  // order first, so visible page v prints as file page v.
-  const printDoc = async (pages?: number[]) => {
+  const printDoc = async () => {
     if (printBusyRef.current) return
     printBusyRef.current = true
     try {
       await flushThen(async () => {
         setPrinting(true)
         try {
-          const data = await window.pdfApi.readFile(filePath)
-          await printPdf(new Uint8Array(data), pages)
+          const result = await window.pdfApi.printDocument(filePath)
+          if (!result.ok && result.error) opFailed(result.error)
         } catch (err) {
           opFailed(err instanceof Error ? err.message : String(err))
         } finally {
@@ -5250,27 +5238,6 @@ export default function App() {
     } finally {
       printBusyRef.current = false
     }
-  }
-
-  /** Print dialog confirm: visible page numbers → 1-based file pages */
-  const confirmPrint = () => {
-    if (printMode === 'all') {
-      setPrintDlg(false)
-      void printDoc()
-      return
-    }
-    if (printMode === 'current') {
-      setPrintDlg(false)
-      void printDoc([printCurrentPage])
-      return
-    }
-    const pages = parsePageRanges(printInput, pageCount)
-    if (!pages || pages.length === 0) {
-      setPrintInvalid(true)
-      return
-    }
-    setPrintDlg(false)
-    void printDoc(pages)
   }
 
   /** Capability surface for AI tools; rebuilt each render (AiPanel mirrors it via refs to get the latest) */
@@ -8849,66 +8816,6 @@ export default function App() {
                     </button>
                     <button className="pdf-modal-btn primary" onClick={confirmSplit}>
                       {t('ok')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {printDlg && (
-              <div className="pdf-modal-mask" onClick={() => setPrintDlg(false)}>
-                <div className="pdf-modal" onClick={(e) => e.stopPropagation()}>
-                  <div className="pdf-modal-title">{t('print')}</div>
-                  <label className="pdf-modal-row">
-                    <input
-                      type="radio"
-                      name="print-range"
-                      checked={printMode === 'all'}
-                      onChange={() => setPrintMode('all')}
-                    />
-                    <span>{t('printRangeAll')}</span>
-                  </label>
-                  <label className="pdf-modal-row">
-                    <input
-                      type="radio"
-                      name="print-range"
-                      checked={printMode === 'current'}
-                      onChange={() => setPrintMode('current')}
-                    />
-                    <span>
-                      {t('printRangeCurrent')} ({printCurrentPage})
-                    </span>
-                  </label>
-                  <label className="pdf-modal-row">
-                    <input
-                      type="radio"
-                      name="print-range"
-                      checked={printMode === 'custom'}
-                      onChange={() => setPrintMode('custom')}
-                    />
-                    <span>{t('printRangeCustom')}</span>
-                  </label>
-                  {printMode === 'custom' && (
-                    <input
-                      className={`pdf-modal-input${printInvalid ? ' invalid' : ''}`}
-                      value={printInput}
-                      placeholder={t('printRangeHint')}
-                      autoFocus
-                      onChange={(e) => {
-                        setPrintInput(e.target.value)
-                        setPrintInvalid(false)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') confirmPrint()
-                        else if (e.key === 'Escape') setPrintDlg(false)
-                      }}
-                    />
-                  )}
-                  <div className="pdf-modal-actions">
-                    <button className="pdf-modal-btn" onClick={() => setPrintDlg(false)}>
-                      {t('cancel')}
-                    </button>
-                    <button className="pdf-modal-btn primary" onClick={confirmPrint}>
-                      {t('print')}
                     </button>
                   </div>
                 </div>

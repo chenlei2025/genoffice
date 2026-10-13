@@ -661,6 +661,8 @@ export const fr = {
   appPrintAlign: 'Alignement',
   appPrintCenterHorizontal: 'Centrer horizontalement',
   appPrintCenterVertical: 'Centrer verticalement',
+  appPrintCenterHorizontalOff: 'Centrage horizontal désactivé',
+  appPrintCenterVerticalOff: 'Centrage vertical désactivé',
   appPrintSent: 'Envoyé à l’imprimante.',
   appPrintCanceled: 'Impression annulée.',
   appPrintFailed: 'Impression impossible.',

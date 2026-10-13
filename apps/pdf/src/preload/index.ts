@@ -66,6 +66,7 @@ const api: PdfApi = {
     ipcRenderer.on(PDF_CHANNELS.printRequest, listener)
     return () => ipcRenderer.removeListener(PDF_CHANNELS.printRequest, listener)
   },
+  printDocument: (path) => ipcRenderer.invoke(PDF_CHANNELS.printDocument, path),
   onFileRenamed: (handler) => {
     const listener = (_e: Electron.IpcRendererEvent, newPath: string) => handler(newPath)
     ipcRenderer.on(PDF_CHANNELS.fileRenamed, listener)

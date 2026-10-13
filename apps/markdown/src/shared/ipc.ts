@@ -36,6 +36,7 @@ export const MARKDOWN_CHANNELS = {
   consumeHeadlessExport: 'markdown:consume-headless-export',
   headlessExportDone: 'markdown:headless-export-done',
   printRequest: 'markdown:print-request',
+  printDocument: 'markdown:print-document',
   aiGenerateImage: 'markdown:ai-generate-image',
   getLanguage: 'app:get-language',
   languageChanged: 'app:language-changed',
@@ -137,6 +138,8 @@ export type ImageExportPreparation =
 export type ExportResult =
   { ok: true; path: string } | { ok: true; canceled: true } | { ok: false; error: string }
 
+export type PrintDocumentResult = { ok: true; path?: string } | { ok: false; error?: string }
+
 export interface ImageData {
   base64: string
   mime: ExportImageMime
@@ -197,8 +200,9 @@ export interface MarkdownApi {
   onViewImage(handler: (src: string) => void): () => void
   /** Shell menu export → renderer serializes and calls exportDocx/exportPdf */
   onExportRequest(handler: (format: ExportFormat) => void): () => void
-  /** Shell menu Print → renderer builds the print HTML and opens the system print dialog */
+  /** Shell menu Print → renderer builds the print HTML and opens the combined print dialog */
   onPrintRequest(handler: () => void): () => void
+  printDocument(request: ExportPdfRequest): Promise<PrintDocumentResult>
   exportDocx(request: ExportDocxRequest): Promise<ExportResult>
   exportPdf(request: ExportPdfRequest): Promise<ExportResult>
   prepareImageExport(request: Omit<ExportPdfRequest, 'outPath'>): Promise<ImageExportPreparation>

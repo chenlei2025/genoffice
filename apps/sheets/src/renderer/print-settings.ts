@@ -203,8 +203,9 @@ export function resolveEffectivePageSetup(
     margins,
     printGridlines: journal.printGridlines ?? file?.printGridlines ?? false,
     printHeadings: journal.printHeadings ?? file?.printHeadings ?? false,
-    horizontalCentered: file?.horizontalCentered ?? false,
-    verticalCentered: file?.verticalCentered ?? false,
+    /// App default: center on the page when journal/file omit the flags.
+    horizontalCentered: journal.horizontalCentered ?? file?.horizontalCentered ?? true,
+    verticalCentered: journal.verticalCentered ?? file?.verticalCentered ?? true,
     printAreas: printArea,
     printTitles,
     header,

@@ -66,6 +66,10 @@ export const zh = {
   ribbonOpen: '打开…',
   ribbonSave: '保存',
   ribbonSaveAs: '另存为…',
+  // Home · Print
+  ribbonPrint: '打印',
+  ribbonPrintTip: '打印当前文档',
+  ribbonGroupPrint: '打印',
   // Home · Clipboard
   ribbonPaste: '粘贴',
   ribbonCutTip: '剪切 (⌘X)',

@@ -546,6 +546,8 @@ export const zhTW = {
   appPrintAlign: '對齊',
   appPrintCenterHorizontal: '水平置中',
   appPrintCenterVertical: '垂直置中',
+  appPrintCenterHorizontalOff: '已取消水平置中',
+  appPrintCenterVerticalOff: '已取消垂直置中',
   appPrintSent: '已傳送至印表機。',
   appPrintCanceled: '列印已取消。',
   appPrintFailed: '無法列印。',

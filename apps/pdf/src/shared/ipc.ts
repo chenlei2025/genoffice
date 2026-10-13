@@ -42,6 +42,7 @@ export const PDF_CHANNELS = {
   saveAsResult: 'pdf:save-as-result',
   saveAsFlow: 'pdf:save-as-flow',
   printRequest: 'pdf:print-request',
+  printDocument: 'pdf:print-document',
   fileRenamed: 'pdf:file-renamed',
   getLanguage: 'app:get-language',
   languageChanged: 'app:language-changed',
@@ -781,8 +782,9 @@ export interface PdfApi {
   sendSaveAsResult(ok: boolean): void
   /** True while the shell's Save As flow (dialog included) is open — the renderer pauses autosave, since the dialog's window blur would otherwise trigger a save into the original */
   onSaveAsFlow(handler: (inFlight: boolean) => void): () => void
-  /** Shell menu Print → renderer runs its print flow (save, rasterize, system dialog) */
+  /** Shell menu Print → renderer flushes edits then opens the combined print dialog */
   onPrintRequest(handler: () => void): () => void
+  printDocument(path: string): Promise<{ ok: true; path?: string } | { ok: false; error?: string }>
   /** The file was renamed or moved from the shell (home Folders / Files pane); the viewer follows the new path */
   onFileRenamed(handler: (newPath: string) => void): () => void
   getLanguage(): Promise<Lang>

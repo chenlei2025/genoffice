@@ -556,6 +556,8 @@ export const zh = {
   appPrintAlign: '居中方式',
   appPrintCenterHorizontal: '水平居中',
   appPrintCenterVertical: '垂直居中',
+  appPrintCenterHorizontalOff: '已取消水平居中',
+  appPrintCenterVerticalOff: '已取消垂直居中',
   appPrintSent: '已发送到打印机。',
   appPrintCanceled: '打印已取消。',
   appPrintFailed: '无法打印。',

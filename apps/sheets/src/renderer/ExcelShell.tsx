@@ -322,6 +322,9 @@ export interface PageLayoutEcho {
   readonly margins?: 'normal' | 'wide' | 'narrow' | undefined
   readonly printGridlines?: boolean | undefined
   readonly printHeadings?: boolean | undefined
+  /// Effective print centering (app default: both on).
+  readonly horizontalCentered?: boolean | undefined
+  readonly verticalCentered?: boolean | undefined
   readonly showGridlines: boolean
   readonly showHeadings: boolean
   readonly printArea?: string | null | undefined
@@ -2041,6 +2044,33 @@ function Ribbon({
             >
               <i className="check-box">{pageLayout.printHeadings ? '✓' : ''}</i>
               {t('appPrintCheck')}
+            </button>
+          </div>
+          <div className="check-column">
+            <span className="check-head">{t('appPrintAlign')}</span>
+            <button
+              className="check-item"
+              data-tip={t('appPrintCenterHorizontal')}
+              onClick={() =>
+                onCommand(
+                  `page-layout:center-h:${pageLayout.horizontalCentered === false ? '1' : '0'}`,
+                )
+              }
+            >
+              <i className="check-box">{pageLayout.horizontalCentered !== false ? '✓' : ''}</i>
+              {t('appPrintCenterHorizontalShort')}
+            </button>
+            <button
+              className="check-item"
+              data-tip={t('appPrintCenterVertical')}
+              onClick={() =>
+                onCommand(
+                  `page-layout:center-v:${pageLayout.verticalCentered === false ? '1' : '0'}`,
+                )
+              }
+            >
+              <i className="check-box">{pageLayout.verticalCentered !== false ? '✓' : ''}</i>
+              {t('appPrintCenterVerticalShort')}
             </button>
           </div>
         </RibbonGroup>

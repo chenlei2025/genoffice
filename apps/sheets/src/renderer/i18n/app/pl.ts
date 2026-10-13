@@ -630,6 +630,8 @@ export const pl = {
   appPrintAlign: 'Wyrównanie',
   appPrintCenterHorizontal: 'Wyśrodkuj w poziomie',
   appPrintCenterVertical: 'Wyśrodkuj w pionie',
+  appPrintCenterHorizontalOff: 'Wyśrodkowanie w poziomie wyłączone',
+  appPrintCenterVerticalOff: 'Wyśrodkowanie w pionie wyłączone',
   appPrintSent: 'Wysłano do drukarki.',
   appPrintCanceled: 'Drukowanie anulowane.',
   appPrintFailed: 'Nie można wydrukować.',

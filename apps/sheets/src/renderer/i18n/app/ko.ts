@@ -614,6 +614,8 @@ export const ko = {
   appPrintAlign: '맞춤',
   appPrintCenterHorizontal: '가로 가운데',
   appPrintCenterVertical: '세로 가운데',
+  appPrintCenterHorizontalOff: '가로 가운데 해제',
+  appPrintCenterVerticalOff: '세로 가운데 해제',
   appPrintSent: '프린터로 전송했습니다.',
   appPrintCanceled: '인쇄가 취소되었습니다.',
   appPrintFailed: '인쇄할 수 없습니다.',

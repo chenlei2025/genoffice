@@ -224,6 +224,9 @@ export interface PageSetupJournalState {
   margins?: 'normal' | 'wide' | 'narrow'
   printGridlines?: boolean
   printHeadings?: boolean
+  /// printOptions/@horizontalCentered / @verticalCentered
+  horizontalCentered?: boolean
+  verticalCentered?: boolean
   showGridlines?: boolean
   /// sheetView/@zoomScale (10-400): normal-view zoom percent. Excel persists
   /// zoom in the file; unjournaled, the post-save session reload snapped the

@@ -584,6 +584,8 @@ export const th = {
   appPrintAlign: 'การจัดแนว',
   appPrintCenterHorizontal: 'กึ่งกลางแนวนอน',
   appPrintCenterVertical: 'กึ่งกลางแนวตั้ง',
+  appPrintCenterHorizontalOff: 'ปิดกึ่งกลางแนวนอน',
+  appPrintCenterVerticalOff: 'ปิดกึ่งกลางแนวตั้ง',
   appPrintSent: 'ส่งไปยังเครื่องพิมพ์แล้ว',
   appPrintCanceled: 'ยกเลิกการพิมพ์แล้ว',
   appPrintFailed: 'ไม่สามารถพิมพ์ได้',

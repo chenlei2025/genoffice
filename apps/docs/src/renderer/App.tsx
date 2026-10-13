@@ -6481,6 +6481,7 @@ export function App() {
         setTableDialog(kind)
     },
     onToggleTableGridlines: toggleTableGridlines,
+    onPrint: () => void printDoc(),
     onOpen: () => void openFile(),
     onSave: () => void save(false),
     onSaveAs: () => void save(true),

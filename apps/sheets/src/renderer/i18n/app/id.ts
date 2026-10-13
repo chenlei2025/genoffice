@@ -606,6 +606,8 @@ export const id = {
   appPrintAlign: 'Perataan',
   appPrintCenterHorizontal: 'Tengah horizontal',
   appPrintCenterVertical: 'Tengah vertikal',
+  appPrintCenterHorizontalOff: 'Tengah horizontal nonaktif',
+  appPrintCenterVerticalOff: 'Tengah vertikal nonaktif',
   appPrintSent: 'Dikirim ke printer.',
   appPrintCanceled: 'Pencetakan dibatalkan.',
   appPrintFailed: 'Tidak dapat mencetak.',

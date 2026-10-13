@@ -3,10 +3,16 @@
 /// panel does not open as a second window.
 
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 
-import { BrowserWindow, WebContentsView, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain } from 'electron'
+
+/// Bundled into out/main/chunks so the packaged app can copy them into the
+/// temp preview folder (pdfjs-dist is not shipped as a loose node_modules tree).
+import pdfJsAsset from 'pdfjs-dist/legacy/build/pdf.min.mjs?asset'
+import pdfWorkerAsset from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?asset'
 
 import { getUiLang } from '@genoffice/i18n'
 import { showSaveDialogWithMemory } from '@genoffice/electron-utils'
@@ -149,6 +155,11 @@ type DialogLabelKey =
   | 'appPrintLayoutSection'
   | 'appPrintPagesPerSheet'
   | 'appPrintLayoutDirection'
+  | 'appPrintMarginsInches'
+  | 'appPrintMarginTop'
+  | 'appPrintMarginBottom'
+  | 'appPrintMarginLeft'
+  | 'appPrintMarginRight'
   | 'appPrintBorder'
   | 'appPrintBorderNone'
   | 'appPrintBorderHairline'
@@ -218,13 +229,15 @@ function destinationPaperOptions(defaults: PrintDialogDefaults): string {
 }
 
 /// Right sidebar UI mirrors the macOS system print dialog (label/control rows,
-/// orientation toggles, PDF + Cancel + Print footer). Left preview unchanged.
+/// orientation toggles, PDF + Cancel + Print footer). Left preview is an
+/// same-origin iframe so Layout toggles call `__applyPrintLayout` directly.
 function panelHtml(
   printers: readonly ListedPrinter[],
   defaults: PrintDialogDefaults,
   pageCount: number,
   printContent: PrintContentMeta,
   documentMode = false,
+  previewSrc = 'preview-frame.html',
 ): string {
   const data = JSON.stringify({
     printers,
@@ -232,6 +245,7 @@ function panelHtml(
     pageCount,
     printContent,
     documentMode,
+    previewSrc,
   }).replace(/</g, '\\u003c')
   const none = printers.length === 0
   const custom = typeof defaults.pageSize === 'object' ? defaults.pageSize : { width: 8.5, height: 11 }
@@ -299,18 +313,36 @@ function panelHtml(
     margin: 0;
     height: 100%;
     overflow: hidden;
+    display: flex;
+    flex-direction: row;
     background: Canvas;
     color: CanvasText;
   }
   [hidden] { display: none !important; }
+  /* Same-origin iframe: Layout pane calls contentWindow.__applyPrintLayout
+     directly (no cross-WebContents IPC / z-order). Flex height is explicit. */
+  #preview-pane {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    background: Canvas;
+  }
+  #preview-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: Canvas;
+  }
   aside {
-    position: fixed;
-    top: 0; right: 0; bottom: 0;
+    flex: 0 0 ${SIDEBAR_PX}px;
     width: ${SIDEBAR_PX}px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    height: 100%;
     overflow: hidden;
     background: Canvas;
     border-left: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
@@ -427,6 +459,24 @@ function panelHtml(
   .orient input { position: absolute; opacity: 0; pointer-events: none; }
   .orient svg { display: block; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .margin-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+  .margin-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+    color: color-mix(in srgb, CanvasText 72%, transparent);
+    min-width: 0;
+  }
+  .margin-grid input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+  }
   .hint {
     margin: 0 2px;
     font-size: 11px;
@@ -677,6 +727,9 @@ function panelHtml(
 </style>
 </head>
 <body>
+<div id="preview-pane">
+  <iframe id="preview-frame" title="Print preview" src="${escapeHtml(previewSrc)}"></iframe>
+</div>
 <aside>
 <div class="fields">
   <h1 class="title">${escapeHtml(label('appPrintDialogTitle'))}</h1>
@@ -787,6 +840,27 @@ function panelHtml(
       <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <div class="section-body">
+      <div class="s-row top">
+        <div class="s-lbl">${escapeHtml(label('appPrintMarginsInches'))}</div>
+        <div class="s-ctl margin-grid">
+          <label>
+            <span>${escapeHtml(label('appPrintMarginTop'))}</span>
+            <input id="margin-top" type="number" min="0" max="3" step="0.05" value="${defaults.margins.top}">
+          </label>
+          <label>
+            <span>${escapeHtml(label('appPrintMarginBottom'))}</span>
+            <input id="margin-bottom" type="number" min="0" max="3" step="0.05" value="${defaults.margins.bottom}">
+          </label>
+          <label>
+            <span>${escapeHtml(label('appPrintMarginLeft'))}</span>
+            <input id="margin-left" type="number" min="0" max="3" step="0.05" value="${defaults.margins.left}">
+          </label>
+          <label>
+            <span>${escapeHtml(label('appPrintMarginRight'))}</span>
+            <input id="margin-right" type="number" min="0" max="3" step="0.05" value="${defaults.margins.right}">
+          </label>
+        </div>
+      </div>
       <div class="s-row">
         <div class="s-lbl">${escapeHtml(label('appPrintPagesPerSheet'))}</div>
         <div class="s-ctl">
@@ -986,11 +1060,91 @@ function panelHtml(
     pageFrom.disabled = !on
     pageTo.disabled = !on
   }
-  rangeAll.onchange = syncRange
-  rangeCurrent.onchange = syncRange
-  rangeFromTo.onchange = syncRange
+  const compactRange = (pages) => {
+    const s = [...new Set(pages)].filter((n) => n >= 1).sort((a, b) => a - b)
+    if (!s.length) return ''
+    const parts = []
+    let start = s[0], prev = s[0]
+    for (let i = 1; i < s.length; i++) {
+      if (s[i] === prev + 1) { prev = s[i]; continue }
+      parts.push(start === prev ? String(start) : start + '-' + prev)
+      start = prev = s[i]
+    }
+    parts.push(start === prev ? String(start) : start + '-' + prev)
+    return parts.join(',')
+  }
+  let ignorePick = false
+  const previewWin = () => {
+    const frame = document.getElementById('preview-frame')
+    return frame && frame.contentWindow
+  }
+  const pickedFromPreview = () => {
+    const w = previewWin()
+    if (!w || typeof w.__getSelectedPages !== 'function') return null
+    return w.__getSelectedPages()
+  }
+  const syncPrintEnabled = () => {
+    const picked = pickedFromPreview()
+    const none = Array.isArray(picked) && picked.length === 0
+    const printEl = document.getElementById('print')
+    const saveEl = document.getElementById('save-pdf')
+    if (printEl) printEl.disabled = data.printers.length === 0 || none
+    if (saveEl) saveEl.disabled = none
+  }
+  const pushRangeToPreview = () => {
+    if (ignorePick) return
+    const w = previewWin()
+    if (!w) return
+    if (rangeAll.checked) {
+      if (typeof w.__selectAllPages === 'function') w.__selectAllPages()
+      return
+    }
+    if (rangeCurrent.checked) {
+      const cur = typeof w.__getCurrentPage === 'function' ? w.__getCurrentPage() : 1
+      if (typeof w.__setSelectedPages === 'function') w.__setSelectedPages([cur])
+      return
+    }
+    let from = Math.round(num('page-from')) || 1
+    let to = Math.round(num('page-to')) || from
+    if (from > to) { const s = from; from = to; to = s }
+    const list = []
+    for (let i = from; i <= to; i++) list.push(i)
+    if (typeof w.__setSelectedPages === 'function') w.__setSelectedPages(list)
+  }
+  rangeAll.onchange = () => { syncRange(); pushRangeToPreview(); syncPrintEnabled() }
+  rangeCurrent.onchange = () => { syncRange(); pushRangeToPreview(); syncPrintEnabled() }
+  rangeFromTo.onchange = () => { syncRange(); pushRangeToPreview(); syncPrintEnabled() }
   pageFrom.onfocus = () => { rangeFromTo.checked = true; syncRange() }
   pageTo.onfocus = () => { rangeFromTo.checked = true; syncRange() }
+  pageFrom.addEventListener('change', () => { pushRangeToPreview(); syncPrintEnabled() })
+  pageTo.addEventListener('change', () => { pushRangeToPreview(); syncPrintEnabled() })
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'print-page-selection') return
+    const pages = Array.isArray(event.data.pages) ? event.data.pages : []
+    const total = Math.round(Number(event.data.total)) || 0
+    if (total >= 1) {
+      data.pageCount = total
+      pageFrom.max = String(total)
+      pageTo.max = String(total)
+    }
+    ignorePick = true
+    if (pages.length === 0) {
+      rangeFromTo.checked = true
+    } else if (total >= 1 && pages.length === total) {
+      rangeAll.checked = true
+    } else {
+      rangeFromTo.checked = true
+      const sorted = [...pages].sort((a, b) => a - b)
+      const contig = sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1)
+      if (contig && sorted.length) {
+        pageFrom.value = String(sorted[0])
+        pageTo.value = String(sorted[sorted.length - 1])
+      }
+    }
+    syncRange()
+    ignorePick = false
+    syncPrintEnabled()
+  })
   syncRange()
   const paper = document.getElementById('paper')
   const customPaperRow = document.getElementById('custom-paper-row')
@@ -1003,6 +1157,7 @@ function panelHtml(
     if (noPrinter) noPrinter.hidden = data.printers.length > 0
   }
   syncDestination()
+  syncPrintEnabled()
   for (const head of document.querySelectorAll('.section.collapsible > .section-head')) {
     head.addEventListener('click', () => {
       const section = head.closest('.section')
@@ -1011,7 +1166,7 @@ function panelHtml(
     })
   }
   // Keep wheel/trackpad scrolling inside the sidebar so the left preview
-  // WebContentsView never receives scroll-chained events from this pane.
+  // iframe never receives scroll-chained events from this pane.
   document.querySelector('.fields').addEventListener(
     'wheel',
     (event) => { event.stopPropagation() },
@@ -1073,32 +1228,134 @@ function panelHtml(
   const sourcePageSize = () => paper.value === 'custom'
     ? { width: num('paper-width'), height: num('paper-height') }
     : paper.value
+  const clampMargin = (value) => {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return 0
+    return Math.min(3, Math.max(0, Math.round(n * 100) / 100))
+  }
+  const currentMargins = () => {
+    const d = data.defaults.margins || { top: 0.75, bottom: 0.75, left: 0.7, right: 0.7 }
+    const read = (id, fallback) => {
+      const el = document.getElementById(id)
+      return el ? clampMargin(el.value) : clampMargin(fallback)
+    }
+    return {
+      top: read('margin-top', d.top),
+      bottom: read('margin-bottom', d.bottom),
+      left: read('margin-left', d.left),
+      right: read('margin-right', d.right),
+    }
+  }
   const currentLayout = () => {
     const d = data.defaults
     const centerH = document.getElementById('center-h')
     const centerV = document.getElementById('center-v')
+    const reverseOrient = document.getElementById('reverse-orient')
+    const flipH = document.getElementById('flip-h')
+    const pageBorder = document.getElementById('page-border')
     return {
       landscape: document.getElementById('orient-landscape').checked,
       pageSize: scaleToFit.checked ? destPaper.value : sourcePageSize(),
-      margins: d.margins,
+      margins: currentMargins(),
       scale: (Math.round(num('scale')) || Math.round(d.scale * 100) || 100) / 100,
       fitMode: currentFitMode(),
       horizontalCentered: centerH ? centerH.checked : !!d.horizontalCentered,
       verticalCentered: centerV ? centerV.checked : !!d.verticalCentered,
+      reverseOrientation: reverseOrient ? reverseOrient.checked : false,
+      flipHorizontal: flipH ? flipH.checked : false,
+      pageBorder: pageBorder && pageBorder.value === 'hairline' ? 'hairline' : 'none',
+      pagesPerSheet: Math.min(16, Math.max(1, Math.round(num('pages-per-sheet')) || 1)),
+      layoutDirection: layoutDirection(),
+    }
+  }
+  /// Mirror of previewLayoutPatch — runs in the sidebar so Layout toggles
+  /// update the iframe without waiting on main-process IPC.
+  const PAPER_IN = {
+    Letter: { width: 8.5, height: 11 },
+    Tabloid: { width: 11, height: 17 },
+    Legal: { width: 8.5, height: 14 },
+    A3: { width: 11.69, height: 16.54 },
+    A4: { width: 8.27, height: 11.69 },
+    A5: { width: 5.83, height: 8.27 },
+  }
+  const nupGrid = (n) => {
+    const v = Math.min(16, Math.max(1, Math.round(n) || 1))
+    const hit = [1, 2, 4, 6, 9, 16].find((x) => x >= v) || 16
+    if (hit === 2) return { cols: 2, rows: 1 }
+    if (hit === 4) return { cols: 2, rows: 2 }
+    if (hit === 6) return { cols: 3, rows: 2 }
+    if (hit === 9) return { cols: 3, rows: 3 }
+    if (hit === 16) return { cols: 4, rows: 4 }
+    return { cols: 1, rows: 1 }
+  }
+  const layoutPatch = (L) => {
+    const paper = typeof L.pageSize === 'string'
+      ? (PAPER_IN[L.pageSize] || PAPER_IN.A4)
+      : L.pageSize
+    const across = L.landscape ? paper.height : paper.width
+    const down = L.landscape ? paper.width : paper.height
+    const round3 = (x) => Math.round(x * 1000) / 1000
+    const grid = nupGrid(L.pagesPerSheet || 1)
+    const dir = L.layoutDirection === 'rtl-ttb' || L.layoutDirection === 'ttb-ltr' || L.layoutDirection === 'ttb-rtl'
+      ? L.layoutDirection : 'ltr-ttb'
+    return {
+      pageW: round3(across),
+      pageH: round3(down),
+      top: round3(L.margins.top),
+      right: round3(L.margins.right),
+      bottom: round3(L.margins.bottom),
+      left: round3(L.margins.left),
+      scale: round3(Math.min(2, Math.max(0.1, L.scale))),
+      fitMode: L.fitMode,
+      align: L.horizontalCentered ? 'center' : 'flex-start',
+      justify: L.verticalCentered ? 'center' : 'flex-start',
+      reverseOrientation: !!L.reverseOrientation,
+      flipHorizontal: !!L.flipHorizontal,
+      pageBorder: L.pageBorder === 'hairline' ? 'hairline' : 'none',
+      pagesPerSheet: grid.cols * grid.rows,
+      layoutDirection: dir,
+      nupCols: grid.cols,
+      nupRows: grid.rows,
+    }
+  }
+  const previewFrame = document.getElementById('preview-frame')
+  const applyToPreview = (patch) => {
+    const w = previewFrame && previewFrame.contentWindow
+    if (!w || typeof w.__applyPrintLayout !== 'function') return false
+    try {
+      w.__applyPrintLayout(patch)
+      return true
+    } catch {
+      return false
     }
   }
   const publishLayout = () => {
-    if (data.documentMode) return
-    if (window.printDialog && window.printDialog.layout) window.printDialog.layout(currentLayout())
+    const payload = currentLayout()
+    const patch = layoutPatch(payload)
+    if (!applyToPreview(patch) && previewFrame) {
+      const onLoad = () => { applyToPreview(patch) }
+      previewFrame.addEventListener('load', onLoad, { once: true })
+      // Module PDF preview may expose __applyPrintLayout slightly after load.
+      let tries = 0
+      const poll = setInterval(() => {
+        tries += 1
+        if (applyToPreview(patch) || tries > 80) clearInterval(poll)
+      }, 50)
+    }
+    if (window.printDialog && window.printDialog.layout) void window.printDialog.layout(payload)
   }
   for (const id of [
     'paper', 'orient-portrait', 'orient-landscape', 'paper-width', 'paper-height',
     'scale', 'scale-mode-pct', 'scale-mode-fit', 'fit-adjust', 'center-h', 'center-v',
-    'dest-paper',
+    'dest-paper', 'reverse-orient', 'flip-h', 'page-border', 'pages-per-sheet',
+    'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
   ]) {
     const el = document.getElementById(id)
     if (!el) continue
     el.addEventListener('input', publishLayout)
+    el.addEventListener('change', publishLayout)
+  }
+  for (const el of document.querySelectorAll('input[name="layout-dir"]')) {
     el.addEventListener('change', publishLayout)
   }
   const submitChoice = (deviceName) => {
@@ -1106,19 +1363,37 @@ function panelHtml(
     printBtn.disabled = true
     savePdfBtn.disabled = true
     document.getElementById('cancel').disabled = true
-    const d = data.defaults
     const layout = currentLayout()
+    const picked = pickedFromPreview()
+    let nextRangeMode = rangeMode()
+    let nextCustom = customRangeValue()
+    if (picked) {
+      const total = (previewWin() && previewWin().__getLogicalPageCount) ? previewWin().__getLogicalPageCount() : data.pageCount
+      if (picked.length === 0) {
+        printBtn.disabled = false
+        savePdfBtn.disabled = false
+        document.getElementById('cancel').disabled = false
+        return
+      }
+      if (picked.length === total) {
+        nextRangeMode = 'all'
+        nextCustom = ''
+      } else {
+        nextRangeMode = 'custom'
+        nextCustom = compactRange(picked)
+      }
+    }
     window.printDialog.submit({
       deviceName,
       copies: Math.round(num('copies')) || 1,
       collate: document.getElementById('collate').checked,
       color: document.getElementById('color').value === '1',
       duplexMode: document.getElementById('duplex').value,
-      rangeMode: rangeMode(),
-      customRange: customRangeValue(),
+      rangeMode: nextRangeMode,
+      customRange: nextCustom,
       landscape: layout.landscape,
       pageSize: sourcePageSize(),
-      margins: d.margins,
+      margins: layout.margins,
       scale: layout.scale,
       fitMode: layout.fitMode,
       horizontalCentered: layout.horizontalCentered,
@@ -1140,6 +1415,8 @@ function panelHtml(
   }
   savePdfBtn.onclick = () => submitChoice(SAVE_AS_PDF)
   printBtn.onclick = () => submitChoice(select.value)
+  // Sync left preview to the sidebar's initial layout (Word PDF.js included).
+  publishLayout()
 </script>
 </body>
 </html>`
@@ -1149,7 +1426,7 @@ function preloadSource(channel: string, layoutChannel: string, contentChannel: s
   return `const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('printDialog', {
   submit: (choice) => ipcRenderer.send(${JSON.stringify(channel)}, choice),
-  layout: (layout) => ipcRenderer.send(${JSON.stringify(layoutChannel)}, layout),
+  layout: (layout) => ipcRenderer.invoke(${JSON.stringify(layoutChannel)}, layout),
   setContent: (scope) => ipcRenderer.invoke(${JSON.stringify(contentChannel)}, scope),
 })
 `
@@ -1182,10 +1459,129 @@ const PREVIEW_FIT_SCRIPT = `(() => {
   let lastLabel = ''
   let built = false
   let scrolling = false
+  let reverseOrientation = false
+  let flipHorizontal = false
+  let pageBorder = 'none'
+  let nupCols = 1
+  let nupRows = 1
+  let layoutDirection = 'ltr-ttb'
+  let selectedPages = null
+  let logicalPageCount = 0
   const VIRTUALIZE_AFTER = 1
   const VISIBLE_BUFFER = 0
   const MOUNT_IDLE_MS = 70
   const pageOf = ${JSON.stringify(label('appPrintPageOf'))}
+  const nupCellIndex = (fillIndex, cols, rows, direction) => {
+    const total = cols * rows
+    if (fillIndex < 0 || fillIndex >= total || cols < 1 || rows < 1) return fillIndex
+    let row = 0
+    let col = 0
+    if (direction === 'rtl-ttb') {
+      row = Math.floor(fillIndex / cols)
+      col = cols - 1 - (fillIndex % cols)
+    } else if (direction === 'ttb-ltr') {
+      col = Math.floor(fillIndex / rows)
+      row = fillIndex % rows
+    } else if (direction === 'ttb-rtl') {
+      col = cols - 1 - Math.floor(fillIndex / rows)
+      row = fillIndex % rows
+    } else {
+      row = Math.floor(fillIndex / cols)
+      col = fillIndex % cols
+    }
+    return row * cols + col
+  }
+  const allPageNums = (n) => {
+    const out = []
+    for (let i = 1; i <= n; i++) out.push(i)
+    return out
+  }
+  const pageIsOn = (n) => !selectedPages || selectedPages.has(n)
+  const pruneSelection = (total) => {
+    logicalPageCount = Math.max(0, total)
+    if (!selectedPages) return
+    const next = new Set()
+    for (const n of selectedPages) if (n >= 1 && n <= logicalPageCount) next.add(n)
+    selectedPages = next.size === logicalPageCount ? null : next
+  }
+  const notifySelection = () => {
+    try {
+      window.parent.postMessage({
+        type: 'print-page-selection',
+        pages: window.__getSelectedPages(),
+        total: logicalPageCount,
+      }, '*')
+    } catch { /* parent gone */ }
+  }
+  const paintPicks = () => {
+    for (const wrap of pages.querySelectorAll('.preview-sheet')) {
+      let anyOn = false
+      let anyOff = false
+      for (const btn of wrap.querySelectorAll('.preview-page-pick')) {
+        const n = Number(btn.dataset.page)
+        const on = pageIsOn(n)
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+        if (on) anyOn = true
+        else anyOff = true
+      }
+      wrap.classList.toggle('is-off', anyOff && !anyOn)
+    }
+  }
+  const togglePage = (n) => {
+    if (!(n >= 1 && n <= logicalPageCount)) return
+    if (!selectedPages) selectedPages = new Set(allPageNums(logicalPageCount))
+    if (selectedPages.has(n)) selectedPages.delete(n)
+    else selectedPages.add(n)
+    if (selectedPages.size === logicalPageCount) selectedPages = null
+    paintPicks()
+    notifySelection()
+  }
+  const makePickBtn = (pageNo) => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'preview-page-pick'
+    btn.dataset.page = String(pageNo)
+    btn.textContent = String(pageNo)
+    btn.setAttribute('aria-pressed', 'true')
+    btn.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      togglePage(pageNo)
+    })
+    return btn
+  }
+  const makePickRow = (spec) => {
+    const row = document.createElement('div')
+    row.className = 'preview-page-picks'
+    if (spec && spec.nup) {
+      for (const p of spec.pages) row.appendChild(makePickBtn(p.pageNo))
+    } else {
+      row.appendChild(makePickBtn(spec.pageNo))
+    }
+    return row
+  }
+  const slotOf = (wrap) =>
+    wrap && wrap.querySelector ? wrap.querySelector('.preview-card-slot') || wrap : wrap
+  window.__getSelectedPages = () =>
+    selectedPages ? [...selectedPages].sort((a, b) => a - b) : allPageNums(logicalPageCount)
+  window.__getLogicalPageCount = () => logicalPageCount
+  window.__selectAllPages = () => {
+    selectedPages = null
+    paintPicks()
+    return true
+  }
+  window.__setSelectedPages = (list) => {
+    selectedPages = new Set()
+    if (Array.isArray(list)) {
+      for (const raw of list) {
+        const n = Math.round(Number(raw))
+        if (n >= 1 && n <= logicalPageCount) selectedPages.add(n)
+      }
+    }
+    if (selectedPages.size === logicalPageCount) selectedPages = null
+    paintPicks()
+    return true
+  }
   const originals = [...document.querySelectorAll('.area')]
   const sources = originals.map((area) => area.cloneNode(true))
   for (const area of originals) area.remove()
@@ -1215,17 +1611,48 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     const right = root.style.getPropertyValue('--m-right') || getComputedStyle(root).getPropertyValue('--m-right')
     const bottom = root.style.getPropertyValue('--m-bottom') || getComputedStyle(root).getPropertyValue('--m-bottom')
     const left = root.style.getPropertyValue('--m-left') || getComputedStyle(root).getPropertyValue('--m-left')
-    const align = root.style.getPropertyValue('--align-x') || getComputedStyle(root).getPropertyValue('--align-x') || 'flex-start'
-    const justify = root.style.getPropertyValue('--align-y') || getComputedStyle(root).getPropertyValue('--align-y') || 'flex-start'
+    const align = (root.style.getPropertyValue('--align-x') || getComputedStyle(root).getPropertyValue('--align-x') || 'flex-start').trim() || 'flex-start'
+    const justify = (root.style.getPropertyValue('--align-y') || getComputedStyle(root).getPropertyValue('--align-y') || 'flex-start').trim() || 'flex-start'
     area.style.boxSizing = 'border-box'
     area.style.display = 'flex'
     area.style.flexDirection = 'column'
     if (pageW) area.style.width = pageW.trim() + 'in'
     if (pageH) area.style.height = pageH.trim() + 'in'
     area.style.padding = [top, right, bottom, left].map((v) => (v || '0').trim() + 'in').join(' ')
-    area.style.justifyContent = justify.trim() || 'flex-start'
-    area.style.alignItems = align.trim() || 'flex-start'
+    // Alignment lives on .layout-fx so reverse/flip can wrap content without
+    // fighting the pane-fit scale on .area.
+    area.style.justifyContent = 'stretch'
+    area.style.alignItems = 'stretch'
     area.style.overflow = 'hidden'
+    if (pageBorder === 'hairline') {
+      area.style.outline = '1px solid #000'
+      area.style.outlineOffset = '-1px'
+    } else {
+      area.style.outline = ''
+      area.style.outlineOffset = ''
+    }
+    let fx = area.querySelector(':scope > .layout-fx')
+    if (!fx) {
+      fx = document.createElement('div')
+      fx.className = 'layout-fx'
+      while (area.firstChild) fx.appendChild(area.firstChild)
+      area.appendChild(fx)
+    }
+    fx.style.boxSizing = 'border-box'
+    fx.style.flex = '1 1 auto'
+    fx.style.minHeight = '0'
+    fx.style.width = '100%'
+    fx.style.height = '100%'
+    fx.style.display = 'flex'
+    fx.style.flexDirection = 'column'
+    fx.style.justifyContent = justify
+    fx.style.alignItems = align
+    fx.style.overflow = 'hidden'
+    const parts = []
+    if (reverseOrientation) parts.push('rotate(180deg)')
+    if (flipHorizontal) parts.push('scaleX(-1)')
+    fx.style.transform = parts.length ? parts.join(' ') : ''
+    fx.style.transformOrigin = 'center center'
   }
 
   const applySheetScale = (sheet, zoom) => {
@@ -1262,9 +1689,9 @@ const PREVIEW_FIT_SCRIPT = `(() => {
       }))
       return
     }
-    cardMetrics = [...pages.children].map((slot) => ({
-      top: slot.offsetTop,
-      height: slot.offsetHeight,
+    cardMetrics = [...pages.children].map((wrap) => ({
+      top: wrap.offsetTop,
+      height: wrap.offsetHeight,
     }))
   }
 
@@ -1331,20 +1758,34 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     }
   }
 
-  const mountCard = (spec) => {
+  const mountLogicalPage = (spec, nested) => {
     const source = sources[spec.sourceIndex]
     if (!source) return null
+    const savedReverse = reverseOrientation
+    const savedFlip = flipHorizontal
+    const savedBorder = pageBorder
+    if (nested) {
+      // Sheet-level Layout toggles wrap the whole N-up card, not each cell.
+      reverseOrientation = false
+      flipHorizontal = false
+      pageBorder = 'none'
+    }
     const card = source.cloneNode(true)
     applyPageChrome(card)
-    const cardSheet = card.querySelector('.sheet')
-    if (!cardSheet) {
-      applyAreaPaneTransform(card)
-      return card
+    if (nested) {
+      reverseOrientation = savedReverse
+      flipHorizontal = savedFlip
+      pageBorder = savedBorder
     }
+    const cardSheet = card.querySelector('.sheet')
+    if (!cardSheet) return card
     applySheetScale(cardSheet, spec.zoom)
     if (spec.pageCount > 1) {
-      card.style.justifyContent = 'flex-start'
-      card.style.alignItems = spec.alignX
+      const fx = card.querySelector(':scope > .layout-fx')
+      if (fx) {
+        fx.style.justifyContent = 'flex-start'
+        fx.style.alignItems = spec.alignX
+      }
       const clip = document.createElement('div')
       clip.className = 'page-clip'
       clip.style.display = 'flex'
@@ -1356,12 +1797,62 @@ const PREVIEW_FIT_SCRIPT = `(() => {
       cardSheet.replaceWith(clip)
       clip.appendChild(cardSheet)
     }
+    return card
+  }
+
+  const mountCard = (spec) => {
+    if (spec && spec.nup) {
+      const sheet = document.createElement('div')
+      sheet.className = 'area'
+      applyPageChrome(sheet)
+      const fx = sheet.querySelector(':scope > .layout-fx')
+      if (!fx) {
+        applyAreaPaneTransform(sheet)
+        return sheet
+      }
+      fx.style.display = 'grid'
+      fx.style.gridTemplateColumns = 'repeat(' + spec.cols + ', 1fr)'
+      fx.style.gridTemplateRows = 'repeat(' + spec.rows + ', 1fr)'
+      fx.style.gap = '1px'
+      fx.style.background = 'color-mix(in srgb, CanvasText 18%, transparent)'
+      fx.style.justifyContent = 'stretch'
+      fx.style.alignItems = 'stretch'
+      const cellCount = spec.cols * spec.rows
+      const cells = []
+      for (let i = 0; i < cellCount; i++) {
+        const cell = document.createElement('div')
+        cell.style.overflow = 'hidden'
+        cell.style.position = 'relative'
+        cell.style.background = '#fff'
+        cells.push(cell)
+        fx.appendChild(cell)
+      }
+      const fit = Math.min(1 / spec.cols, 1 / spec.rows)
+      for (let i = 0; i < spec.pages.length; i++) {
+        const cell = cells[nupCellIndex(i, spec.cols, spec.rows, spec.dir)]
+        if (!cell) continue
+        const mini = mountLogicalPage(spec.pages[i], true)
+        if (!mini) continue
+        // Nested page chrome is already full-paper; scale into the N-up cell.
+        mini.style.position = 'absolute'
+        mini.style.top = '0'
+        mini.style.left = '0'
+        mini.style.transform = 'scale(' + fit + ')'
+        mini.style.transformOrigin = 'top left'
+        cell.appendChild(mini)
+      }
+      applyAreaPaneTransform(sheet)
+      return sheet
+    }
+    const card = mountLogicalPage(spec, false)
+    if (!card) return null
     applyAreaPaneTransform(card)
     return card
   }
 
   const clearBitmaps = () => {
-    for (const slot of pages.children) {
+    for (const wrap of pages.children) {
+      const slot = slotOf(wrap)
       if (slot.dataset.frozen !== '1') continue
       slot.replaceChildren()
       slot.dataset.frozen = '0'
@@ -1378,7 +1869,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     const { first, last } = visibleRange()
     const virtualize = pageSpecs.length > VIRTUALIZE_AFTER
     for (let i = 0; i < pages.childElementCount; i++) {
-      const slot = pages.children[i]
+      const slot = slotOf(pages.children[i])
       if (slot.dataset.frozen === '1') {
         slot.dataset.empty = '0'
         slot.dataset.live = '0'
@@ -1432,6 +1923,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     pageWpx = 0
     pageHpx = 0
     let contentScale = baseScale
+    const logical = []
     measureHost.replaceChildren()
     for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
       const source = sources[sourceIndex]
@@ -1466,22 +1958,46 @@ const PREVIEW_FIT_SCRIPT = `(() => {
         .getPropertyValue('--align-x') || 'flex-start').trim() || 'flex-start'
       probe.remove()
       for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-        pageSpecs.push({
+        logical.push({
           sourceIndex,
           pageIndex,
           pageCount,
           zoom,
           ah,
           alignX,
+          pageNo: logical.length + 1,
         })
-        const slot = document.createElement('div')
-        slot.className = 'preview-card-slot'
-        slot.dataset.empty = '1'
-        slot.dataset.live = '0'
-        slot.dataset.frozen = '0'
-        pages.appendChild(slot)
       }
     }
+    const perSheet = Math.max(1, nupCols * nupRows)
+    if (perSheet <= 1) {
+      pageSpecs = logical
+    } else {
+      for (let i = 0; i < logical.length; i += perSheet) {
+        pageSpecs.push({
+          nup: true,
+          cols: nupCols,
+          rows: nupRows,
+          dir: layoutDirection,
+          pages: logical.slice(i, i + perSheet),
+        })
+      }
+    }
+    for (let i = 0; i < pageSpecs.length; i++) {
+      const wrap = document.createElement('div')
+      wrap.className = 'preview-sheet'
+      const slot = document.createElement('div')
+      slot.className = 'preview-card-slot'
+      slot.dataset.empty = '1'
+      slot.dataset.live = '0'
+      slot.dataset.frozen = '0'
+      wrap.appendChild(slot)
+      wrap.appendChild(makePickRow(pageSpecs[i]))
+      pages.appendChild(wrap)
+    }
+    pruneSelection(logical.length)
+    paintPicks()
+    notifySelection()
     window.__contentScale = contentScale
     window.__fitMode = fitMode
     built = pageSpecs.length > 0
@@ -1494,7 +2010,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     const fitted = (paneW - 24) / pageWpx
     const next = Math.max(0.15, Math.min(4, fitted * userZoom))
     const scaleChanged = Math.abs(next - paneScale) >= 0.0005
-    const needsSize = !pages.firstElementChild?.style.width
+    const needsSize = !slotOf(pages.firstElementChild)?.style.width
     if (!scaleChanged && !needsSize) {
       cacheCardMetrics()
       return true
@@ -1503,7 +2019,8 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     paneScale = next
     const slotW = Math.ceil(pageWpx * paneScale) + 'px'
     const slotH = Math.ceil(pageHpx * paneScale) + 'px'
-    for (const slot of pages.children) {
+    for (const wrap of pages.children) {
+      const slot = slotOf(wrap)
       slot.style.width = slotW
       slot.style.height = slotH
       slot.style.containIntrinsicSize = slotW + ' ' + slotH
@@ -1546,13 +2063,50 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     fitMode = mode === 'sheet' || mode === 'width' ? mode : 'scale'
     rebuildAndFit()
   }
+  /// Sidebar layout IPC: paper / margins / scale / center / N-up / flip / border.
+  /// Clears frozen bitmaps so cards remount with the new chrome.
+  window.__applyPrintLayout = (layout) => {
+    if (!layout) return false
+    const root = document.documentElement
+    root.style.setProperty('--page-w', String(layout.pageW))
+    root.style.setProperty('--page-h', String(layout.pageH))
+    root.style.setProperty('--m-top', String(layout.top))
+    root.style.setProperty('--m-right', String(layout.right))
+    root.style.setProperty('--m-bottom', String(layout.bottom))
+    root.style.setProperty('--m-left', String(layout.left))
+    root.style.setProperty('--print-scale', String(layout.scale))
+    root.style.setProperty('--align-x', layout.align)
+    root.style.setProperty('--align-y', layout.justify)
+    root.style.setProperty(
+      '--v-min',
+      layout.justify === 'center'
+        ? 'calc((' + layout.pageH + ' - ' + layout.top + ' - ' + layout.bottom + ') * 1in)'
+        : '0',
+    )
+    reverseOrientation = !!layout.reverseOrientation
+    flipHorizontal = !!layout.flipHorizontal
+    pageBorder = layout.pageBorder === 'hairline' ? 'hairline' : 'none'
+    nupCols = Math.max(1, Math.round(Number(layout.nupCols)) || 1)
+    nupRows = Math.max(1, Math.round(Number(layout.nupRows)) || 1)
+    layoutDirection =
+      layout.layoutDirection === 'rtl-ttb' ||
+      layout.layoutDirection === 'ttb-ltr' ||
+      layout.layoutDirection === 'ttb-rtl'
+        ? layout.layoutDirection
+        : 'ltr-ttb'
+    baseScale = typeof layout.scale === 'number' && layout.scale > 0 ? layout.scale : 1
+    fitMode = layout.fitMode === 'sheet' || layout.fitMode === 'width' ? layout.fitMode : 'scale'
+    clearBitmaps()
+    rebuildAndFit()
+    return true
+  }
   /// Live+mostly-visible pages ready for main-process capturePage.
   window.__freezeCandidates = () => {
     if (!built || scrolling) return []
     const host = scroll.getBoundingClientRect()
     const out = []
     for (let i = 0; i < pages.childElementCount; i++) {
-      const slot = pages.children[i]
+      const slot = slotOf(pages.children[i])
       if (slot.dataset.frozen === '1' || slot.dataset.live !== '1') continue
       const r = slot.getBoundingClientRect()
       const overlap = Math.min(r.bottom, host.bottom) - Math.max(r.top, host.top)
@@ -1568,8 +2122,27 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     }
     return out
   }
+  window.__getCurrentPage = () => {
+    const total = Math.max(1, cardMetrics.length || pageSpecs.length)
+    if (cardMetrics.length === 0) return 1
+    const mid = scroll.scrollTop + scroll.clientHeight * 0.35
+    let current = 1
+    for (let i = 0; i < cardMetrics.length; i++) {
+      const top = cardMetrics[i].top
+      const bottom = top + cardMetrics[i].height
+      if (mid >= top && mid < bottom) {
+        current = i + 1
+        break
+      }
+      if (mid >= bottom) current = i + 1
+    }
+    const spec = pageSpecs[Math.min(total, Math.max(1, current)) - 1]
+    if (spec && spec.nup && spec.pages[0]) return spec.pages[0].pageNo
+    if (spec && spec.pageNo) return spec.pageNo
+    return Math.min(total, Math.max(1, current))
+  }
   window.__applyPageBitmap = (index, dataUrl) => {
-    const slot = pages.children[index]
+    const slot = slotOf(pages.children[index])
     if (!slot || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return false
     const img = document.createElement('img')
     img.className = 'preview-card-bitmap'
@@ -1708,6 +2281,445 @@ async function closePrintWindow(win: BrowserWindow): Promise<void> {
   })
 }
 
+async function readPdfPageCount(pdfPath: string): Promise<number> {
+  const { PDFDocument } = await import('pdf-lib')
+  const pdf = await PDFDocument.load(await readFile(pdfPath))
+  return Math.max(1, pdf.getPageCount())
+}
+
+/// Document-mode left pane: PDF.js cards on `Canvas`. Loaded in the left
+/// Word PDF preview document loaded in the print dialog iframe.
+async function writePdfJsPreviewHtml(workDir: string, pdfPath: string): Promise<string> {
+  const htmlPath = join(workDir, 'pdf-preview.html')
+  /// readFile+writeFile (not copyFile): assets live inside app.asar.
+  await writeFile(join(workDir, 'pdf.min.mjs'), await readFile(pdfJsAsset))
+  await writeFile(join(workDir, 'pdf.worker.min.mjs'), await readFile(pdfWorkerAsset))
+  const pdfBase64 = (await readFile(pdfPath)).toString('base64')
+  await writeFile(
+    htmlPath,
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: Canvas;
+  color: CanvasText;
+  overflow: hidden;
+}
+#scroll {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 16px 12px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  background: Canvas;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, CanvasText 26%, transparent) transparent;
+}
+#scroll::-webkit-scrollbar { width: 8px; }
+#scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, CanvasText 26%, transparent);
+  border-radius: 4px;
+}
+.card {
+  flex: none;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, CanvasText 14%, transparent),
+    0 1px 2px color-mix(in srgb, CanvasText 10%, transparent),
+    0 6px 18px color-mix(in srgb, CanvasText 12%, transparent);
+  overflow: hidden;
+  display: flex;
+}
+.card .nup-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 1px;
+  background: color-mix(in srgb, CanvasText 18%, transparent);
+}
+.card .nup-cell {
+  overflow: hidden;
+  position: relative;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card .stage {
+  flex: none;
+  transform-origin: center center;
+}
+.card canvas { display: block; }
+.card-wrap {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.card-wrap.is-off .card { opacity: 0.42; }
+.preview-page-picks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.preview-page-pick {
+  min-width: 28px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+  color: CanvasText;
+  font: 11px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+.preview-page-pick[aria-pressed="true"] {
+  background: AccentColor;
+  border-color: AccentColor;
+  color: Canvas;
+}
+.err {
+  margin: 24px;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+</style></head><body>
+<div id="scroll"></div>
+<script type="module">
+import * as pdfjs from './pdf.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
+const scroll = document.getElementById('scroll');
+const CSS_PX = 96;
+const pageNodes = [];
+let pendingLayout = null;
+let userZoom = 1;
+let fitRaf = 0;
+let selectedPages = null;
+let resolveReady;
+window.__pdfReady = new Promise((resolve) => { resolveReady = resolve; });
+const nupCellIndex = (fillIndex, cols, rows, direction) => {
+  const total = cols * rows;
+  if (fillIndex < 0 || fillIndex >= total || cols < 1 || rows < 1) return fillIndex;
+  let row = 0;
+  let col = 0;
+  if (direction === 'rtl-ttb') {
+    row = Math.floor(fillIndex / cols);
+    col = cols - 1 - (fillIndex % cols);
+  } else if (direction === 'ttb-ltr') {
+    col = Math.floor(fillIndex / rows);
+    row = fillIndex % rows;
+  } else if (direction === 'ttb-rtl') {
+    col = cols - 1 - Math.floor(fillIndex / rows);
+    row = fillIndex % rows;
+  } else {
+    row = Math.floor(fillIndex / cols);
+    col = fillIndex % cols;
+  }
+  return row * cols + col;
+};
+const allPageNums = (n) => {
+  const out = [];
+  for (let i = 1; i <= n; i++) out.push(i);
+  return out;
+};
+const pageIsOn = (n) => !selectedPages || selectedPages.has(n);
+const notifySelection = () => {
+  try {
+    window.parent.postMessage({
+      type: 'print-page-selection',
+      pages: window.__getSelectedPages(),
+      total: pageNodes.length,
+    }, '*');
+  } catch { /* parent gone */ }
+};
+const paintPicks = () => {
+  for (const wrap of scroll.querySelectorAll('.card-wrap')) {
+    let anyOn = false;
+    let anyOff = false;
+    for (const btn of wrap.querySelectorAll('.preview-page-pick')) {
+      const n = Number(btn.dataset.page);
+      const on = pageIsOn(n);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (on) anyOn = true;
+      else anyOff = true;
+    }
+    wrap.classList.toggle('is-off', anyOff && !anyOn);
+  }
+};
+const togglePage = (n) => {
+  const total = pageNodes.length;
+  if (!(n >= 1 && n <= total)) return;
+  if (!selectedPages) selectedPages = new Set(allPageNums(total));
+  if (selectedPages.has(n)) selectedPages.delete(n);
+  else selectedPages.add(n);
+  if (selectedPages.size === total) selectedPages = null;
+  paintPicks();
+  notifySelection();
+};
+const makePickBtn = (pageNo) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'preview-page-pick';
+  btn.dataset.page = String(pageNo);
+  btn.textContent = String(pageNo);
+  btn.setAttribute('aria-pressed', 'true');
+  btn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePage(pageNo);
+  });
+  return btn;
+};
+window.__getSelectedPages = () =>
+  selectedPages ? [...selectedPages].sort((a, b) => a - b) : allPageNums(pageNodes.length);
+window.__getLogicalPageCount = () => pageNodes.length;
+window.__selectAllPages = () => {
+  selectedPages = null;
+  paintPicks();
+  return true;
+};
+window.__setSelectedPages = (list) => {
+  selectedPages = new Set();
+  const total = pageNodes.length;
+  if (Array.isArray(list)) {
+    for (const raw of list) {
+      const n = Math.round(Number(raw));
+      if (n >= 1 && n <= total) selectedPages.add(n);
+    }
+  }
+  if (selectedPages.size === total) selectedPages = null;
+  paintPicks();
+  return true;
+};
+window.__getCurrentPage = () => {
+  const cards = [...scroll.querySelectorAll('.card-wrap, :scope > .card')];
+  if (cards.length === 0) return 1;
+  const mid = scroll.scrollTop + scroll.clientHeight * 0.35;
+  let current = 1;
+  for (let i = 0; i < cards.length; i++) {
+    const top = cards[i].offsetTop;
+    const bottom = top + cards[i].offsetHeight;
+    if (mid >= top && mid < bottom) return i + 1;
+    if (mid >= bottom) current = i + 1;
+  }
+  return Math.min(cards.length, Math.max(1, current));
+};
+/// Fit paper cards into the left pane width (default zoom-to-fit).
+const paneViewScale = (paperW) => {
+  const paneW = Math.max(scroll.clientWidth - 24, 40);
+  if (!(paperW > 0)) return 1;
+  return Math.max(0.12, Math.min(4, (paneW / paperW) * userZoom));
+};
+const applyPrintLayoutNow = (layout) => {
+  if (!layout || !scroll || pageNodes.length === 0) return false;
+  pendingLayout = layout;
+  const paperW = Number(layout.pageW) * CSS_PX;
+  const paperH = Number(layout.pageH) * CSS_PX;
+  const view = paneViewScale(paperW);
+  const padT = Number(layout.top) * CSS_PX * view;
+  const padR = Number(layout.right) * CSS_PX * view;
+  const padB = Number(layout.bottom) * CSS_PX * view;
+  const padL = Number(layout.left) * CSS_PX * view;
+  const dispW = Math.max(1, paperW * view);
+  const dispH = Math.max(1, paperH * view);
+  const innerW = Math.max(1, dispW - padL - padR);
+  const innerH = Math.max(1, dispH - padT - padB);
+  const scale = Math.min(2, Math.max(0.1, Number(layout.scale) || 1));
+  const cols = Math.max(1, Math.round(Number(layout.nupCols)) || 1);
+  const rows = Math.max(1, Math.round(Number(layout.nupRows)) || 1);
+  const perSheet = cols * rows;
+  const direction =
+    layout.layoutDirection === 'rtl-ttb' ||
+    layout.layoutDirection === 'ttb-ltr' ||
+    layout.layoutDirection === 'ttb-rtl'
+      ? layout.layoutDirection
+      : 'ltr-ttb';
+  const sheetTransforms = [];
+  if (layout.reverseOrientation) sheetTransforms.push('rotate(180deg)');
+  if (layout.flipHorizontal) sheetTransforms.push('scaleX(-1)');
+  const sheetTransform = sheetTransforms.length ? sheetTransforms.join(' ') : '';
+  const hairline = layout.pageBorder === 'hairline';
+  scroll.replaceChildren();
+  for (let i = 0; i < pageNodes.length; i += perSheet) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.width = Math.round(dispW) + 'px';
+    card.style.height = Math.round(dispH) + 'px';
+    card.style.padding =
+      Math.round(padT) + 'px ' + Math.round(padR) + 'px ' +
+      Math.round(padB) + 'px ' + Math.round(padL) + 'px';
+    card.style.alignItems = 'stretch';
+    card.style.justifyContent = 'stretch';
+    if (hairline) {
+      card.style.outline = '1px solid #000';
+      card.style.outlineOffset = '-1px';
+    } else {
+      card.style.outline = '';
+      card.style.outlineOffset = '';
+    }
+    const grid = document.createElement('div');
+    grid.className = 'nup-grid';
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+    grid.style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
+    grid.style.transform = sheetTransform;
+    grid.style.transformOrigin = 'center center';
+    const cells = [];
+    for (let c = 0; c < perSheet; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'nup-cell';
+      cells.push(cell);
+      grid.appendChild(cell);
+    }
+    const cellW = innerW / cols;
+    const cellH = innerH / rows;
+    const chunk = pageNodes.slice(i, i + perSheet);
+    for (let p = 0; p < chunk.length; p++) {
+      const cell = cells[nupCellIndex(p, cols, rows, direction)];
+      if (!cell) continue;
+      const node = chunk[p];
+      const natW = node.pageWIn * CSS_PX;
+      const natH = node.pageHIn * CSS_PX;
+      const fit = Math.min(cellW / natW, cellH / natH) * scale;
+      const tw = Math.max(1, Math.floor(natW * fit));
+      const th = Math.max(1, Math.floor(natH * fit));
+      node.canvas.style.width = tw + 'px';
+      node.canvas.style.height = th + 'px';
+      node.stage.style.width = tw + 'px';
+      node.stage.style.height = th + 'px';
+      node.stage.style.transform = '';
+      cell.appendChild(node.stage);
+    }
+    card.appendChild(grid);
+    const wrap = document.createElement('div');
+    wrap.className = 'card-wrap';
+    wrap.appendChild(card);
+    const picks = document.createElement('div');
+    picks.className = 'preview-page-picks';
+    for (let p = 0; p < chunk.length; p++) {
+      picks.appendChild(makePickBtn(chunk[p].pageIndex));
+    }
+    wrap.appendChild(picks);
+    scroll.appendChild(wrap);
+  }
+  paintPicks();
+  notifySelection();
+  return true;
+};
+window.__applyPrintLayout = (layout) => {
+  pendingLayout = layout;
+  return applyPrintLayoutNow(layout);
+};
+window.__fitPreview = () => {
+  if (pendingLayout) applyPrintLayoutNow(pendingLayout);
+};
+const scheduleFit = () => {
+  if (fitRaf) return;
+  fitRaf = requestAnimationFrame(() => {
+    fitRaf = 0;
+    window.__fitPreview();
+  });
+};
+const waitForPane = () => new Promise((resolve) => {
+  if (scroll.clientWidth >= 40 && scroll.clientHeight >= 40) {
+    resolve();
+    return;
+  }
+  const ro = new ResizeObserver(() => {
+    if (scroll.clientWidth >= 40 && scroll.clientHeight >= 40) {
+      ro.disconnect();
+      resolve();
+    }
+  });
+  ro.observe(scroll);
+  // Fallback if ResizeObserver never fires (should not happen after setBounds).
+  setTimeout(() => { ro.disconnect(); resolve(); }, 2000);
+});
+try {
+  await waitForPane();
+  const bin = atob('${pdfBase64}');
+  const data = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+  const doc = await pdfjs.getDocument({ data, useWasm: false }).promise;
+  const total = doc.numPages;
+  // Rasterize once; Layout pane (N-up / flip / border) rearranges via
+  // __applyPrintLayout without re-rendering PDF pages.
+  const renderScale = 1.5;
+  for (let i = 1; i <= total; i++) {
+    const page = await doc.getPage(i);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: renderScale });
+    const stage = document.createElement('div');
+    stage.className = 'stage';
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const pageWIn = base.width / 72;
+    const pageHIn = base.height / 72;
+    canvas.dataset.pageWIn = String(pageWIn);
+    canvas.dataset.pageHIn = String(pageHIn);
+    canvas.style.width = Math.floor(pageWIn * CSS_PX) + 'px';
+    canvas.style.height = Math.floor(pageHIn * CSS_PX) + 'px';
+    stage.appendChild(canvas);
+    pageNodes.push({ stage, canvas, pageWIn, pageHIn, pageIndex: i });
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    page.cleanup();
+  }
+  new ResizeObserver(scheduleFit).observe(scroll);
+  window.addEventListener('resize', scheduleFit);
+  window.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    userZoom = Math.max(0.25, Math.min(4, userZoom * Math.exp(-event.deltaY * 0.01)));
+    scheduleFit();
+  }, { passive: false });
+} catch (err) {
+  const p = document.createElement('p');
+  p.className = 'err';
+  p.textContent = String(err && err.message ? err.message : err);
+  scroll.appendChild(p);
+} finally {
+  if (pendingLayout) {
+    applyPrintLayoutNow(pendingLayout);
+  } else if (pageNodes.length > 0) {
+    // Until the sidebar publishes layout, show pages fitted to the pane.
+    const first = pageNodes[0];
+    applyPrintLayoutNow({
+      pageW: first.pageWIn,
+      pageH: first.pageHIn,
+      top: 0, right: 0, bottom: 0, left: 0,
+      scale: 1,
+      fitMode: 'scale',
+      align: 'center',
+      justify: 'center',
+      reverseOrientation: false,
+      flipHorizontal: false,
+      pageBorder: 'none',
+      pagesPerSheet: 1,
+      layoutDirection: 'ltr-ttb',
+      nupCols: 1,
+      nupRows: 1,
+    });
+  }
+  resolveReady();
+}
+</script>
+</body></html>`,
+    'utf8',
+  )
+  return htmlPath
+}
+
 /// Subset 1-based pages into a new PDF, keeping the requested order
 /// (needed for Paper Handling reverse / odd-even).
 async function subsetPdfPages(pdf: Buffer, pageList: readonly number[]): Promise<Buffer> {
@@ -1776,25 +2788,25 @@ async function printPdfBytesSilent(
 }
 
 async function previewPageInfo(
-  preview: WebContentsView,
+  win: BrowserWindow,
 ): Promise<{ pageCount: number; currentPage: number }> {
-  if (preview.webContents.isDestroyed()) return { pageCount: 1, currentPage: 1 }
+  if (win.isDestroyed()) return { pageCount: 1, currentPage: 1 }
   try {
-    const info = (await preview.webContents.executeJavaScript(`(() => {
-      const slots = [...document.querySelectorAll('#preview-pages > .preview-card-slot')]
-      const total = Math.max(1, slots.length)
-      const scroll = document.getElementById('preview-scroll')
-      let current = 1
-      if (scroll && slots.length > 0) {
-        const mid = scroll.scrollTop + scroll.clientHeight * 0.35
-        for (let i = 0; i < slots.length; i++) {
-          const top = slots[i].offsetTop
-          const bottom = top + slots[i].offsetHeight
-          if (mid >= top && mid < bottom) { current = i + 1; break }
-          if (mid >= bottom) current = i + 1
-        }
-      }
-      return { pageCount: total, currentPage: current }
+    const info = (await win.webContents.executeJavaScript(`(() => {
+      const frame = document.getElementById('preview-frame')
+      const doc = frame && frame.contentDocument
+      if (!doc) return { pageCount: 1, currentPage: 1 }
+      const w = frame && frame.contentWindow
+      const logical =
+        w && typeof w.__getLogicalPageCount === 'function' ? w.__getLogicalPageCount() : 0
+      const current =
+        w && typeof w.__getCurrentPage === 'function' ? w.__getCurrentPage() : 1
+      const slots = [...doc.querySelectorAll('#preview-pages .preview-card-slot')]
+      const cards = slots.length
+        ? slots
+        : [...doc.querySelectorAll('#scroll .card')]
+      const total = Math.max(1, logical || cards.length)
+      return { pageCount: total, currentPage: Math.max(1, current) }
     })()`)) as { pageCount: number; currentPage: number }
     if (
       info &&
@@ -1823,22 +2835,34 @@ type FreezeCandidate = {
 /// Capture live visible preview pages into bitmaps. Only pages already in view
 /// (no forced scrolling), so flinging through large page counts stays smooth.
 async function freezeVisiblePreviewPages(
-  preview: WebContentsView,
+  win: BrowserWindow,
   generation: { current: number },
   mine: number,
 ): Promise<void> {
-  if (preview.webContents.isDestroyed() || generation.current !== mine) return
+  if (win.isDestroyed() || generation.current !== mine) return
   let candidates: FreezeCandidate[] = []
   try {
-    candidates = (await preview.webContents.executeJavaScript(
-      'typeof window.__freezeCandidates === "function" ? window.__freezeCandidates() : []',
-    )) as FreezeCandidate[]
+    candidates = (await win.webContents.executeJavaScript(`(() => {
+      const frame = document.getElementById('preview-frame')
+      if (!frame || !frame.contentWindow) return []
+      const w = frame.contentWindow
+      if (typeof w.__freezeCandidates !== 'function') return []
+      const host = frame.getBoundingClientRect()
+      const list = w.__freezeCandidates() || []
+      return list.map((c) => ({
+        index: c.index,
+        x: c.x + host.x,
+        y: c.y + host.y,
+        width: c.width,
+        height: c.height,
+      }))
+    })()`)) as FreezeCandidate[]
   } catch {
     return
   }
   if (!Array.isArray(candidates) || candidates.length === 0) return
   for (const candidate of candidates) {
-    if (preview.webContents.isDestroyed() || generation.current !== mine) return
+    if (win.isDestroyed() || generation.current !== mine) return
     if (
       !candidate ||
       !Number.isFinite(candidate.index) ||
@@ -1849,9 +2873,9 @@ async function freezeVisiblePreviewPages(
     }
     // One frame for the live card to paint before capture.
     await new Promise<void>((resolve) => setTimeout(resolve, 16))
-    if (preview.webContents.isDestroyed() || generation.current !== mine) return
+    if (win.isDestroyed() || generation.current !== mine) return
     try {
-      const image = await preview.webContents.capturePage({
+      const image = await win.webContents.capturePage({
         x: Math.max(0, Math.round(candidate.x)),
         y: Math.max(0, Math.round(candidate.y)),
         width: Math.min(Math.round(candidate.width), 4096),
@@ -1859,13 +2883,28 @@ async function freezeVisiblePreviewPages(
       })
       if (image.isEmpty() || generation.current !== mine) continue
       const dataUrl = image.toDataURL()
-      await preview.webContents.executeJavaScript(
-        `window.__applyPageBitmap && window.__applyPageBitmap(${Math.floor(candidate.index)}, ${JSON.stringify(dataUrl)})`,
+      await win.webContents.executeJavaScript(
+        `(() => {
+          const w = document.getElementById('preview-frame')?.contentWindow
+          return w && w.__applyPageBitmap && w.__applyPageBitmap(${Math.floor(candidate.index)}, ${JSON.stringify(dataUrl)})
+        })()`,
       )
     } catch {
       /* resize / navigation race — skip this page */
     }
   }
+}
+
+/// Sheets print HTML + preview-fit script so the iframe exposes __applyPrintLayout.
+async function writeWorkbookPreviewHtml(workDir: string, sourceHtmlPath: string): Promise<string> {
+  const source = await readFile(sourceHtmlPath, 'utf8')
+  const outPath = join(workDir, 'preview-frame.html')
+  const script = `<script>${PREVIEW_FIT_SCRIPT}</script>`
+  const html = source.includes('</body>')
+    ? source.replace('</body>', `${script}</body>`)
+    : `${source}${script}`
+  await writeFile(outPath, html, 'utf8')
+  return outPath
 }
 
 export type PrintDialogMode = 'workbook' | 'document'
@@ -1904,7 +2943,12 @@ export async function openCombinedPrintDialog(args: {
     sheetCount: 1,
     hasSelection: false,
   }
-  let liveSettings = args.settings
+  /// Coalesce omitted center flags to the app default (both on).
+  let liveSettings: PrintDialogDefaults = {
+    ...args.settings,
+    horizontalCentered: args.settings.horizontalCentered ?? true,
+    verticalCentered: args.settings.verticalCentered ?? true,
+  }
   let liveRequest = args.sourceRequest
   let documentPageCount = 1
 
@@ -1918,130 +2962,79 @@ export async function openCombinedPrintDialog(args: {
     title: label('appPrintDialogTitle'),
     autoHideMenuBar: true,
     ...(parent ? { parent, modal: true } : {}),
-    webPreferences: { sandbox: true, preload: preloadPath },
+    webPreferences: {
+      /// Off: sandboxed windows cannot read iframe contentWindow.
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      /// Off: Chromium treats each file:// URL as a unique origin, so the
+      /// sidebar could not call `__applyPrintLayout` inside the preview iframe.
+      webSecurity: false,
+      preload: preloadPath,
+    },
   })
-  /// Document mode loads a PDF into the left pane; Chromium's viewer needs
-  /// `plugins: true`. Without it, `loadFile(*.pdf)` can hang forever and the
-  /// dialog never reaches `show()` (Word print stuck on "Generating preview…").
-  const preview = new WebContentsView({
-    webPreferences: { sandbox: true, plugins: documentMode },
-  })
-  win.contentView.addChildView(preview)
-
-  let refitTimer: ReturnType<typeof setTimeout> | undefined
-  const refitPreview = (): void => {
-    if (preview.webContents.isDestroyed()) return
-    // Pane-scale only (no card rebuild). Debounce: setBounds + resize fire
-    // in bursts and each sync JS call janks the UI thread.
-    if (refitTimer !== undefined) clearTimeout(refitTimer)
-    refitTimer = setTimeout(() => {
-      refitTimer = undefined
-      if (preview.webContents.isDestroyed()) return
-      void preview.webContents
-        .executeJavaScript('window.__fitPreview && window.__fitPreview()')
-        .catch(() => {})
-    }, 48)
-  }
-  const layout = (): void => {
-    const [width = 0, height = 0] = win.getContentSize()
-    preview.setBounds({
-      x: 0,
-      y: 0,
-      width: Math.max(0, width - SIDEBAR_PX),
-      height,
-    })
-    refitPreview()
-  }
-  win.on('resize', layout)
 
   let layoutGen = 0
   let fittedPage = ''
+  let previewFramePath = ''
   const freezeGen = { current: 0 }
   let freezeBusy = false
   const freezeTimer = documentMode
     ? undefined
     : setInterval(() => {
-        if (freezeBusy || preview.webContents.isDestroyed()) return
+        if (freezeBusy || win.isDestroyed()) return
         const mine = freezeGen.current
         freezeBusy = true
-        void freezeVisiblePreviewPages(preview, freezeGen, mine).finally(() => {
+        void freezeVisiblePreviewPages(win, freezeGen, mine).finally(() => {
           freezeBusy = false
         })
       }, 120)
-  /// Write margins, scale, and alignment onto the page itself. Inline styles
-  /// beat the baked stylesheet so each keystroke moves the sheet inside the
-  /// paper card without refitting (which would reset the pinch zoom).
-  const applyPreviewLayout = (layout: PreviewLayout): Promise<void> => {
-    if (documentMode || preview.webContents.isDestroyed()) return Promise.resolve()
+  /// Apply layout into the panel's preview iframe (same origin as the sidebar).
+  const applyPreviewLayout = async (layout: PreviewLayout): Promise<boolean> => {
+    if (win.isDestroyed()) return false
     const patch = previewLayoutPatch(layout)
     const pageKey = `${patch.pageW}x${patch.pageH}`
     const gen = ++layoutGen
     freezeGen.current += 1
-    return preview.webContents
-      .executeJavaScript(
-        `(() => {
-          const layout = ${JSON.stringify(patch)}
-          const root = document.documentElement
-          root.style.setProperty('--page-w', String(layout.pageW))
-          root.style.setProperty('--page-h', String(layout.pageH))
-          root.style.setProperty('--m-top', String(layout.top))
-          root.style.setProperty('--m-right', String(layout.right))
-          root.style.setProperty('--m-bottom', String(layout.bottom))
-          root.style.setProperty('--m-left', String(layout.left))
-          root.style.setProperty('--print-scale', String(layout.scale))
-          root.style.setProperty('--align-x', layout.align)
-          root.style.setProperty('--align-y', layout.justify)
-          root.style.setProperty(
-            '--v-min',
-            layout.justify === 'center'
-              ? 'calc((' + layout.pageH + ' - ' + layout.top + ' - ' + layout.bottom + ') * 1in)'
-              : '0',
-          )
-          const pad = layout.top + 'in ' + layout.right + 'in ' + layout.bottom + 'in ' + layout.left + 'in'
-          for (const area of document.querySelectorAll('.area')) {
-            area.style.boxSizing = 'border-box'
-            area.style.display = 'flex'
-            area.style.flexDirection = 'column'
-            area.style.width = layout.pageW + 'in'
-            area.style.height = layout.pageH + 'in'
-            area.style.padding = pad
-            area.style.justifyContent = layout.justify
-            area.style.alignItems = layout.align
-            area.style.overflow = 'hidden'
-          }
-          for (const sheet of document.querySelectorAll('.sheet')) {
-            sheet.style.flex = 'none'
-            sheet.style.width = 'max-content'
-            sheet.style.minWidth = 'max-content'
-            sheet.style.maxWidth = 'none'
-            sheet.style.zoom = ''
-          }
-          if (typeof window.__setPrintScale === 'function') {
-            window.__setPrintScale(layout.scale, layout.fitMode)
-          } else {
-            for (const sheet of document.querySelectorAll('.sheet')) {
-              sheet.style.transform = 'scale(' + layout.scale + ')'
-              sheet.style.transformOrigin = 'top left'
+    const patchJson = JSON.stringify(patch)
+    try {
+      const ok = (await win.webContents.executeJavaScript(
+        `(async () => {
+          const frame = document.getElementById('preview-frame')
+          if (!frame) return false
+          const deadline = Date.now() + 8000
+          while (Date.now() < deadline) {
+            const w = frame.contentWindow
+            if (w && typeof w.__applyPrintLayout === 'function') {
+              if (w.__pdfReady) await w.__pdfReady
+              w.__applyPrintLayout(${patchJson})
+              if (typeof w.__fitPreview === 'function') w.__fitPreview()
+              return true
             }
+            await new Promise((r) => setTimeout(r, 32))
           }
+          return false
         })()`,
-      )
-      .then(() => {
-        if (gen !== layoutGen || preview.webContents.isDestroyed()) return
-        fittedPage = pageKey
-        refitPreview()
-      })
-      .catch(() => undefined)
+      )) === true
+      if (gen !== layoutGen || win.isDestroyed()) return ok
+      if (ok) fittedPage = pageKey
+      return ok
+    } catch {
+      return false
+    }
   }
 
   /// sheet/width modes use the preview-measured scale so print matches the
   /// left pane; scale mode keeps the user’s percent.
   const resolvePrintScale = async (choice: PrintDialogChoice): Promise<number> => {
     if (choice.fitMode === 'scale') return choice.scale
-    if (preview.webContents.isDestroyed()) return choice.scale
+    if (win.isDestroyed()) return choice.scale
     try {
-      const scale = (await preview.webContents.executeJavaScript(
-        'typeof window.__contentScale === "number" ? window.__contentScale : null',
+      const scale = (await win.webContents.executeJavaScript(
+        `(() => {
+          const w = document.getElementById('preview-frame')?.contentWindow
+          return w && typeof w.__contentScale === 'number' ? w.__contentScale : null
+        })()`,
       )) as number | null
       if (typeof scale === 'number' && Number.isFinite(scale) && scale >= 0.1 && scale <= 2) {
         return Math.round(scale * 1000) / 1000
@@ -2052,18 +3045,30 @@ export async function openCombinedPrintDialog(args: {
     return choice.scale
   }
 
+  const reloadPreviewFrame = async (absolutePath: string): Promise<void> => {
+    previewFramePath = absolutePath
+    if (win.isDestroyed()) return
+    const name = basename(absolutePath)
+    await win.webContents.executeJavaScript(
+      `(() => {
+        const frame = document.getElementById('preview-frame')
+        if (!frame) return
+        frame.src = ${JSON.stringify(name + '?t=' + Date.now())}
+      })()`,
+    )
+  }
+
   let settled = false
   const choice = await new Promise<PrintDialogChoice | { error: string } | null>((resolve) => {
     let names = new Set<string>()
     let onChoice: (event: IpcMainEvent, payload: unknown) => void = () => {}
-    let onLayout: (event: IpcMainEvent, payload: unknown) => void = () => {}
     const finish = (value: PrintDialogChoice | { error: string } | null) => {
       if (settled) return
       settled = true
       freezeGen.current += 1
       if (freezeTimer !== undefined) clearInterval(freezeTimer)
       ipcMain.removeListener(channel, onChoice)
-      ipcMain.removeListener(layoutChannel, onLayout)
+      ipcMain.removeHandler(layoutChannel)
       ipcMain.removeHandler(contentChannel)
       resolve(value)
     }
@@ -2079,13 +3084,13 @@ export async function openCombinedPrintDialog(args: {
       }
       finish(parsed)
     }
-    onLayout = (_event, payload) => {
-      const next = parsePreviewLayout(payload)
-      if (!next) return
-      void applyPreviewLayout(next)
-    }
     ipcMain.on(channel, onChoice)
-    ipcMain.on(layoutChannel, onLayout)
+    ipcMain.handle(layoutChannel, async (_event, payload: unknown) => {
+      const next = parsePreviewLayout(payload)
+      if (!next) return { ok: false, error: 'invalid layout' }
+      const ok = await applyPreviewLayout(next)
+      return { ok }
+    })
     ipcMain.handle(contentChannel, async (_event, scopeRaw: unknown) => {
       if (documentMode) return { error: label('appPrintFailed') }
       if (
@@ -2102,11 +3107,10 @@ export async function openCombinedPrintDialog(args: {
         liveSettings = rebuilt.settings
         liveRequest = rebuilt.request
         printContentMeta.scope = scopeRaw
-        await preview.webContents.loadFile(args.htmlPath)
-        await preview.webContents.executeJavaScript(PREVIEW_FIT_SCRIPT)
+        const nextPreview = await writeWorkbookPreviewHtml(args.workDir, args.htmlPath)
+        await reloadPreviewFrame(nextPreview)
         await applyPreviewLayout(liveSettings)
-        layout()
-        const { pageCount } = await previewPageInfo(preview)
+        const { pageCount } = await previewPageInfo(win)
         return { ok: true, pageCount }
       } catch (error: unknown) {
         return { error: error instanceof Error ? error.message : label('appPrintFailed') }
@@ -2115,49 +3119,54 @@ export async function openCombinedPrintDialog(args: {
     win.once('closed', () => finish(null))
     void (async () => {
       try {
-        /// Prefer the parent window's printer list — a blank WebContentsView
+        /// Prefer the parent window's printer list — a blank dialog
         /// has stalled getPrintersAsync on some macOS setups.
         const printerSource =
-          parent && !parent.isDestroyed() ? parent.webContents : preview.webContents
+          parent && !parent.isDestroyed() ? parent.webContents : win.webContents
         const listed = await printerSource.getPrintersAsync()
         const printers: ListedPrinter[] = listed.map(listedPrinterOf)
         names = new Set(printers.map((printer) => printer.name))
         let pageCount = 1
+        let previewSrc = 'preview-frame.html'
         if (documentMode && args.pdfPath) {
-          const { PDFDocument } = await import('pdf-lib')
-          const bytes = await readFile(args.pdfPath)
-          const pdf = await PDFDocument.load(bytes)
-          documentPageCount = Math.max(1, pdf.getPageCount())
+          documentPageCount = await readPdfPageCount(args.pdfPath)
           pageCount = documentPageCount
+          previewFramePath = await writePdfJsPreviewHtml(args.workDir, args.pdfPath)
+          previewSrc = basename(previewFramePath)
         } else if (args.htmlPath) {
-          await preview.webContents.loadFile(args.htmlPath)
-          await preview.webContents.executeJavaScript(PREVIEW_FIT_SCRIPT)
-          await applyPreviewLayout(liveSettings)
-          layout()
-          pageCount = (await previewPageInfo(preview)).pageCount
+          previewFramePath = await writeWorkbookPreviewHtml(args.workDir, args.htmlPath)
+          previewSrc = basename(previewFramePath)
+          const raw = await readFile(args.htmlPath, 'utf8')
+          pageCount = Math.max(1, (raw.match(/class="area"/g) ?? []).length)
         }
         await writeFile(
           panelPath,
-          panelHtml(printers, liveSettings, pageCount, printContentMeta, documentMode),
+          panelHtml(
+            printers,
+            liveSettings,
+            pageCount,
+            printContentMeta,
+            documentMode,
+            previewSrc,
+          ),
           'utf8',
         )
         await win.loadFile(panelPath)
-        layout()
+        await applyPreviewLayout(liveSettings)
+        if (!documentMode) {
+          pageCount = (await previewPageInfo(win)).pageCount
+          await win.webContents.executeJavaScript(
+            `(() => {
+              const to = document.getElementById('page-to')
+              const from = document.getElementById('page-from')
+              if (to) { to.max = String(${pageCount}); if (!to.value) to.value = String(${pageCount}) }
+              if (from) from.max = String(${pageCount})
+            })()`,
+          )
+        }
         if (!win.isDestroyed()) {
           win.show()
           win.focus()
-          layout()
-        }
-        /// Load the PDF after the shell is visible so a stuck Chromium PDF
-        /// viewer cannot block the dialog from appearing. `#toolbar=0` hides
-        /// the native viewer chrome (download / print / ⋮) — the right sidebar
-        /// already owns those actions for Word print.
-        if (documentMode && args.pdfPath && !preview.webContents.isDestroyed()) {
-          await Promise.race([
-            preview.webContents.loadFile(args.pdfPath, { hash: 'toolbar=0' }),
-            new Promise<void>((resolve) => setTimeout(resolve, 8000)),
-          ])
-          layout()
         }
       } catch (error: unknown) {
         finish({ error: error instanceof Error ? error.message : String(error) })
@@ -2171,10 +3180,11 @@ export async function openCombinedPrintDialog(args: {
   }
 
   try {
-    const pageInfo = documentMode
-      ? { pageCount: documentPageCount, currentPage: 1 }
-      : await previewPageInfo(preview)
-    const { pageCount, currentPage } = pageInfo
+    const pageInfo = await previewPageInfo(win)
+    const pageCount = documentMode
+      ? Math.max(1, documentPageCount || pageInfo.pageCount)
+      : pageInfo.pageCount
+    const { currentPage } = pageInfo
     const ranged = resolvePrintPageList(choice, pageCount, currentPage)
     if (ranged === null) {
       if (!win.isDestroyed()) win.destroy()
@@ -2273,8 +3283,31 @@ export async function openDocumentPrintDialog(args: {
       margins: { top: 0.75, bottom: 0.75, left: 0.7, right: 0.7 },
       scale: 1,
       fitMode: 'scale',
-      horizontalCentered: false,
-      verticalCentered: false,
+      horizontalCentered: true,
+      verticalCentered: true,
     },
   })
+}
+
+/// Markdown / HTML / PDF / Word: write bytes into a temp folder, open the
+/// combined print dialog, then delete the folder.
+export async function openDocumentPrintDialogFromPdf(args: {
+  parent: BrowserWindow | null
+  pdf: Buffer
+  fileName: string
+}): Promise<WorkbookPrintResult> {
+  const workDir = await mkdtemp(join(tmpdir(), 'genoffice-print-dlg-'))
+  const base = args.fileName.replace(/\.pdf$/i, '').trim() || 'Document'
+  try {
+    const pdfPath = join(workDir, 'preview.pdf')
+    await writeFile(pdfPath, args.pdf)
+    return await openDocumentPrintDialog({
+      parent: args.parent,
+      pdfPath,
+      workDir,
+      fileName: `${base}.pdf`,
+    })
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined)
+  }
 }

@@ -86,6 +86,11 @@ export interface PreviewLayoutInput {
   fitMode: PrintFitMode
   horizontalCentered: boolean
   verticalCentered: boolean
+  reverseOrientation?: boolean
+  flipHorizontal?: boolean
+  pageBorder?: 'none' | 'hairline'
+  pagesPerSheet?: number
+  layoutDirection?: PrintLayoutDirection
 }
 
 function fitModeOf(value: unknown): PrintFitMode | null {
@@ -336,6 +341,12 @@ export function parsePreviewLayout(payload: unknown): PreviewLayoutInput | null 
   if (typeof raw.horizontalCentered !== 'boolean' || typeof raw.verticalCentered !== 'boolean') {
     return null
   }
+  const layoutDirection = layoutDirectionOf(raw.layoutDirection) ?? 'ltr-ttb'
+  const pagesPerSheetRaw = Math.round(Number(raw.pagesPerSheet))
+  const pagesPerSheet =
+    Number.isFinite(pagesPerSheetRaw) && pagesPerSheetRaw >= 1
+      ? Math.min(16, pagesPerSheetRaw)
+      : 1
   return {
     landscape: raw.landscape,
     pageSize,
@@ -344,14 +355,35 @@ export function parsePreviewLayout(payload: unknown): PreviewLayoutInput | null 
     fitMode,
     horizontalCentered: raw.horizontalCentered,
     verticalCentered: raw.verticalCentered,
+    reverseOrientation: raw.reverseOrientation === true,
+    flipHorizontal: raw.flipHorizontal === true,
+    pageBorder: raw.pageBorder === 'hairline' ? 'hairline' : 'none',
+    pagesPerSheet,
+    layoutDirection,
   }
+}
+
+/// Oriented paper size in inches (landscape already applied). Matches the
+/// PDF pages from {@link printToPdfOptionsFromDialog} / CSS `@page`.
+export function orientedPageInches(choice: Pick<PrintDialogChoice, 'pageSize' | 'destinationPageSize' | 'scaleToFit' | 'landscape'>): {
+  width: number
+  height: number
+} {
+  const pageSize = choice.scaleToFit ? choice.destinationPageSize : choice.pageSize
+  const paper = pageInches(pageSize)
+  return choice.landscape
+    ? { width: paper.height, height: paper.width }
+    : { width: paper.width, height: paper.height }
 }
 
 /// Silent print of an already-laid-out PDF: system-dialog destination options
 /// only (page geometry is baked into the PDF bytes).
 /// `margins: none` is required — default/silent FitToPrintableArea would
 /// re-margin the PDF and clip left/right content that the preview showed.
+/// `pageSize` must match the PDF media box; without it the printer default
+/// paper often crops the left/right edges of landscape or A4 jobs.
 export function printOptionsFromDialog(choice: PrintDialogChoice): WebContentsPrintOptions {
+  const paper = orientedPageInches(choice)
   return {
     silent: true,
     printBackground: true,
@@ -361,7 +393,14 @@ export function printOptionsFromDialog(choice: PrintDialogChoice): WebContentsPr
     color: choice.color,
     duplexMode: choice.duplexMode,
     pagesPerSheet: choice.pagesPerSheet,
+    /// PDF pages are already oriented — do not rotate again.
+    landscape: false,
+    scaleFactor: 100,
     margins: { marginType: 'none' },
+    pageSize: {
+      width: Math.round(paper.width * MICRONS_PER_INCH),
+      height: Math.round(paper.height * MICRONS_PER_INCH),
+    },
   }
 }
 
@@ -398,8 +437,10 @@ export function scaleToFitFactor(
 }
 
 /// printToPDF options for layout / Save as PDF. Ranges are applied by subsetting.
+/// Uses an already-oriented custom `pageSize` (inches) + `preferCSSPageSize` so
+/// Chromium's paper matches the preview's `@page` / `--page-*` box — named
+/// sizes with `landscape: true` otherwise diverge and clip left/right.
 export function printToPdfOptionsFromDialog(choice: PrintDialogChoice): PrintToPDFOptions {
-  const pageSize = choice.scaleToFit ? choice.destinationPageSize : choice.pageSize
   let scale = choice.scale
   if (choice.scaleToFit) {
     scale =
@@ -414,11 +455,13 @@ export function printToPdfOptionsFromDialog(choice: PrintDialogChoice): PrintToP
           1000,
       ) / 1000
   }
+  const paper = orientedPageInches(choice)
   return {
-    landscape: choice.landscape,
-    pageSize,
+    landscape: false,
+    pageSize: { width: paper.width, height: paper.height },
     margins: choice.margins,
     scale,
+    preferCSSPageSize: true,
     printBackground: true,
   }
 }
@@ -429,10 +472,11 @@ export function requestFromPrintDialog(
   choice: PrintDialogChoice,
 ): WorkbookExportPdfRequest {
   const pdf = printToPdfOptionsFromDialog(choice)
+  const paper = orientedPageInches(choice)
   return {
     ...request,
-    landscape: choice.landscape,
-    pageSize: choice.scaleToFit ? choice.destinationPageSize : choice.pageSize,
+    landscape: false,
+    pageSize: { width: paper.width, height: paper.height },
     margins: choice.margins,
     scale: typeof pdf.scale === 'number' ? pdf.scale : choice.scale,
     horizontalCentered: choice.horizontalCentered,

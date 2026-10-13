@@ -1158,6 +1158,30 @@ export default function App() {
   }, [canvasMode, closeFind])
 
   const exportingRef = useRef(false)
+  const printingRef = useRef(false)
+  const printDoc = useCallback(async () => {
+    if (statusRef.current !== 'ready' || printingRef.current) return
+    printingRef.current = true
+    try {
+      flushPending()
+      const html = textRef.current
+      const suggestedName =
+        pathRef.current?.replace(/^.*[/\\]/, '').replace(/\.html?$/i, '') ||
+        deriveAutoFileName(html) ||
+        ''
+      const result = await window.htmlApi.printDocument({ html, suggestedName })
+      if (!result.ok && result.error) {
+        console.error('[html] print failed:', result.error)
+        setNotice(t('exportFailed'))
+      }
+    } catch (err) {
+      console.error('[html] print failed:', err)
+      setNotice(t('exportFailed'))
+    } finally {
+      printingRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is not referentially stable
+  }, [])
   /** `outPath` (headless export only) skips the save dialog; resolves true when a file was written. */
   const runExport = useCallback(async (format: ExportFormat, outPath?: string) => {
     if (statusRef.current !== 'ready' || exportingRef.current) return false
@@ -1256,6 +1280,7 @@ export default function App() {
     })
     const offRenamed = window.htmlApi.onFileRenamed((next) => setPath(next))
     const offExport = window.htmlApi.onExportRequest((format) => void runExport(format))
+    const offPrint = window.htmlApi.onPrintRequest(() => void printDoc())
     const offTheme = window.htmlApi.onThemeChanged(() => {
       // let main.tsx flip data-theme first
       window.setTimeout(
@@ -1269,6 +1294,9 @@ export default function App() {
       if (key === 's') {
         event.preventDefault()
         void doSave(event.shiftKey ? 'saveAs' : 'save')
+      } else if (key === 'p' && !event.shiftKey) {
+        event.preventDefault()
+        void printDoc()
       } else if (key === '\\') {
         event.preventDefault()
         cycleView()
@@ -1307,10 +1335,11 @@ export default function App() {
       offClose()
       offRenamed()
       offExport()
+      offPrint()
       offTheme()
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [doSave, runExport, cycleView, zoomIn, zoomOut, flushPending, openFind])
+  }, [doSave, runExport, printDoc, cycleView, zoomIn, zoomOut, flushPending, openFind])
 
   // pinch / ctrl+wheel over the stage chrome around the frame; wheel inside the frame arrives as gx:zoom
   useEffect(() => {

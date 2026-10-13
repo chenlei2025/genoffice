@@ -46,6 +46,8 @@ export function PrintDialog({
   const [frame, setFrame] = useState(false)
   const [includeHidden, setIncludeHidden] = useState(false)
   const [printing, setPrinting] = useState(false)
+  /// null = every preview sheet selected (default).
+  const [pickedSheets, setPickedSheets] = useState<Set<number> | null>(null)
   const blobUrlsRef = useRef<string[]>([])
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const paneRef = useRef<HTMLDivElement | null>(null)
@@ -115,7 +117,20 @@ export function PrintDialog({
     [rangeIndices, includeHidden, slides],
   )
   const rangeInvalid = rangeMode === 'custom' && rangeIndices === null
-  const pageCount = printPageCount(selected.length, layout)
+  const perSheet =
+    layout === 'handout2' ? 2 : layout === 'handout3' ? 3 : layout === 'handout6' ? 6 : 1
+  const sheetCount = printPageCount(selected.length, layout)
+  const printIndices = useMemo(() => {
+    if (selected.length === 0) return []
+    const on = (sheet: number) => !pickedSheets || pickedSheets.has(sheet)
+    const out: number[] = []
+    for (let i = 0; i < selected.length; i++) {
+      const sheet = Math.floor(i / perSheet) + 1
+      if (on(sheet)) out.push(selected[i])
+    }
+    return out
+  }, [selected, pickedSheets, perSheet])
+  const pageCount = printPageCount(printIndices.length, layout)
 
   const previewHtml = useMemo(() => {
     if (!pngs || selected.length === 0) return null
@@ -150,17 +165,58 @@ export function PrintDialog({
     return () => ro.disconnect()
   }, [applyZoom])
 
+  useEffect(() => {
+    setPickedSheets(null)
+  }, [rangeMode, customRange, layout, includeHidden, current])
+
+  const paintPreviewPicks = useCallback(() => {
+    const doc = frameRef.current?.contentDocument
+    if (!doc) return
+    for (const wrap of doc.querySelectorAll<HTMLElement>('.page-wrap')) {
+      const page = Number(wrap.dataset.page)
+      const on = !pickedSheets || pickedSheets.has(page)
+      wrap.classList.toggle('is-off', !on)
+      const btn = wrap.querySelector('.preview-page-pick')
+      btn?.setAttribute('aria-pressed', on ? 'true' : 'false')
+    }
+  }, [pickedSheets])
+
+  const onPreviewLoad = useCallback(() => {
+    applyZoom()
+    const doc = frameRef.current?.contentDocument
+    if (!doc) return
+    doc.querySelectorAll<HTMLButtonElement>('.preview-page-pick').forEach((btn) => {
+      btn.onclick = () => {
+        const page = Number(btn.dataset.page)
+        if (!(page >= 1)) return
+        setPickedSheets((prev) => {
+          const cur = prev ?? new Set(Array.from({ length: sheetCount }, (_, i) => i + 1))
+          const next = new Set(cur)
+          if (next.has(page)) next.delete(page)
+          else next.add(page)
+          if (next.size === sheetCount) return null
+          return next
+        })
+      }
+    })
+    paintPreviewPicks()
+  }, [applyZoom, paintPreviewPicks, sheetCount])
+
+  useEffect(() => {
+    paintPreviewPicks()
+  }, [paintPreviewPicks, previewHtml])
+
   const doPrint = async () => {
-    if (!pngs || selected.length === 0 || printing) return
+    if (!pngs || printIndices.length === 0 || printing) return
     setPrinting(true)
     try {
-      const first = slides[selected[0]]
+      const first = slides[printIndices[0]]
       const r = await window.slidesApi.printSlides({
-        pngsBase64: selected.map((i) => pngs[i]),
+        pngsBase64: printIndices.map((i) => pngs[i]),
         widthPx: first.widthPx,
         heightPx: first.heightPx,
         layout,
-        ...(layout === 'notes' ? { notes: selected.map((i) => notes[i] ?? '') } : {}),
+        ...(layout === 'notes' ? { notes: printIndices.map((i) => notes[i] ?? '') } : {}),
         ...(layout !== 'full' ? { orientation } : {}),
         ...(frame && layout === 'full' ? { frame: true } : {}),
       })
@@ -199,7 +255,7 @@ export function PrintDialog({
                 title={t('appPrintTitle')}
                 sandbox="allow-same-origin"
                 srcDoc={previewHtml}
-                onLoad={applyZoom}
+                onLoad={onPreviewLoad}
               />
             ) : (
               <div className="print-preview-empty">
@@ -304,7 +360,7 @@ export function PrintDialog({
               </label>
             </fieldset>
             <div className="print-page-count">
-              {selected.length > 0 ? t('appPrintPageCount', { n: pageCount }) : ''}
+              {printIndices.length > 0 ? t('appPrintPageCount', { n: pageCount }) : ''}
             </div>
           </div>
         </div>
@@ -312,7 +368,7 @@ export function PrintDialog({
           <button onClick={onClose}>{t('appSettingsCancel')}</button>
           <button
             className="primary"
-            disabled={!pngs || selected.length === 0 || printing}
+            disabled={!pngs || printIndices.length === 0 || printing}
             onClick={() => void doPrint()}
           >
             {printing ? t('appPrintProgress') : t('appPrintTitle')}

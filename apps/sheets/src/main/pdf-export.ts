@@ -69,8 +69,8 @@ function settingsFromRequest(request: WorkbookExportPdfRequest) {
     margins: request.margins,
     scale: request.scale,
     fitMode: request.fitMode ?? 'scale',
-    horizontalCentered: request.horizontalCentered ?? false,
-    verticalCentered: request.verticalCentered ?? false,
+    horizontalCentered: request.horizontalCentered ?? true,
+    verticalCentered: request.verticalCentered ?? true,
   }
 }
 

@@ -68,6 +68,9 @@ export const ja = {
   ribbonSave: '保存',
   ribbonSaveAs: '名前を付けて保存…',
   // Home · Clipboard
+  ribbonPrint: '印刷',
+  ribbonPrintTip: '現在のドキュメントを印刷',
+  ribbonGroupPrint: '印刷',
   ribbonPaste: '貼り付け',
   ribbonCutTip: '切り取り (⌘X)',
   ribbonCopyTip: 'コピー (⌘C)',

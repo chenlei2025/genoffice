@@ -637,6 +637,8 @@ export const nl = {
   appPrintAlign: 'Uitlijning',
   appPrintCenterHorizontal: 'Horizontaal centreren',
   appPrintCenterVertical: 'Verticaal centreren',
+  appPrintCenterHorizontalOff: 'Horizontaal centreren uit',
+  appPrintCenterVerticalOff: 'Verticaal centreren uit',
   appPrintSent: 'Naar de printer verzonden.',
   appPrintCanceled: 'Afdrukken geannuleerd.',
   appPrintFailed: 'Kan niet afdrukken.',

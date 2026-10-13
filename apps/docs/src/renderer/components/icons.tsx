@@ -1411,6 +1411,16 @@ export function IconSplit(props: IconProps) {
   )
 }
 
+export function IconPrint(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5.33 6V3.17h5.33V6" />
+      <path d="M4.67 10.83H4.17A1.17 1.17 0 0 1 3 9.67V7A1.17 1.17 0 0 1 4.17 5.83h7.67A1.17 1.17 0 0 1 13 7v2.67a1.17 1.17 0 0 1-1.17 1.17H11.33" />
+      <rect x="4.83" y="9.17" width="6.33" height="3.67" rx="0.5" />
+    </Svg>
+  )
+}
+
 export function IconPrintLayout(props: IconProps) {
   return (
     <Svg {...props}>

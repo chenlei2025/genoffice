@@ -94,20 +94,30 @@ export function buildPrintDocumentHtml(o: PrintDocOptions): string {
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
     )
 
+  const wrapPreview = (inner: string, pageNo: number, pageClass: string) =>
+    o.preview
+      ? `<div class="page-wrap" data-page="${pageNo}">` +
+        `<div class="${pageClass}">${inner}</div>` +
+        `<button type="button" class="preview-page-pick" data-page="${pageNo}" aria-pressed="true">${pageNo}</button>` +
+        `</div>`
+      : `<div class="${pageClass}">${inner}</div>`
+
   let body: string
   if (isFull) {
-    body = o.srcs.map((src) => `<div class="page"><img src="${escAttr(src)}"></div>`).join('')
-  } else if (layout === 'notes') {
-    // Notes page: slide on top + notes text below
     body = o.srcs
-      .map(
-        (src, i) =>
-          `<div class="page notes"><img src="${escAttr(src)}">` +
-          `<div class="note">${esc(o.notes?.[i] ?? '').replace(/\n/g, '<br>')}</div></div>`,
+      .map((src, i) => wrapPreview(`<img src="${escAttr(src)}">`, i + 1, 'page'))
+      .join('')
+  } else if (layout === 'notes') {
+    body = o.srcs
+      .map((src, i) =>
+        wrapPreview(
+          `<img src="${escAttr(src)}"><div class="note">${esc(o.notes?.[i] ?? '').replace(/\n/g, '<br>')}</div>`,
+          i + 1,
+          'page notes',
+        ),
       )
       .join('')
   } else {
-    // Handouts: perPage thumbnails per page (with 3, ruled lines on the right for handwriting)
     const pages: string[] = []
     for (let i = 0; i < o.srcs.length; i += perPage) {
       const cells = o.srcs
@@ -119,7 +129,7 @@ export function buildPrintDocumentHtml(o: PrintDocOptions): string {
             '</div>',
         )
         .join('')
-      pages.push(`<div class="page handout h${perPage}">${cells}</div>`)
+      pages.push(wrapPreview(cells, pages.length + 1, `page handout h${perPage}`))
     }
     body = pages.join('')
   }
@@ -127,19 +137,19 @@ export function buildPrintDocumentHtml(o: PrintDocOptions): string {
   // h6 grid: 2×3 portrait, 3×2 landscape
   const h6Cols = landscape ? '1fr 1fr 1fr' : '1fr 1fr'
   const frameCss = o.frame && isFull ? '.page > img { border: 1px solid #bbb; }' : ''
-  // Preview chrome (never printed): gray gaps, page shadows, PowerPoint-style page badges
-  const total = printPageCount(o.srcs.length, layout)
+  // Preview chrome (never printed): gray gaps, page shadows, clickable page numbers
   const previewCss = o.preview
     ? `
-body { counter-reset: pg; background: transparent; padding: 18px 0 6px; }
-.page { counter-increment: pg; position: relative; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35); }
-.page::after {
-  content: counter(pg) ' / ${total}';
-  position: absolute; left: 50%; bottom: 3%; transform: translateX(-50%);
-  padding: 3px 12px; border-radius: 999px;
-  background: rgba(32, 33, 36, 0.65); color: #fff;
-  font-size: 10px; white-space: nowrap;
+body { background: transparent; padding: 18px 0 6px; }
+.page-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0 auto 10px; }
+.page-wrap.is-off .page { opacity: 0.42; }
+.page { margin: 0; background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35); }
+.preview-page-pick {
+  min-width: 28px; height: 22px; padding: 0 8px; border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.22); background: rgba(0, 0, 0, 0.08); color: #222;
+  font-size: 11px; line-height: 22px; cursor: pointer;
 }
+.preview-page-pick[aria-pressed="true"] { background: #1a73e8; border-color: #1a73e8; color: #fff; }
 `
     : ''
 

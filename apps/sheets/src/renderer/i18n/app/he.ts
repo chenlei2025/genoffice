@@ -565,6 +565,8 @@ export const he = {
   appPrintAlign: 'יישור',
   appPrintCenterHorizontal: 'מרכוז אופקי',
   appPrintCenterVertical: 'מרכוז אנכי',
+  appPrintCenterHorizontalOff: 'מרכוז אופקי כבוי',
+  appPrintCenterVerticalOff: 'מרכוז אנכי כבוי',
   appPrintSent: 'נשלח למדפסת.',
   appPrintCanceled: 'ההדפסה בוטלה.',
   appPrintFailed: 'לא ניתן להדפיס.',

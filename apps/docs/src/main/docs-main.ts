@@ -170,7 +170,7 @@ import { copyImageDisplaySize, validCopyImageDataUrl } from './copy-image-guard'
 import { printScaleOption, validPrintGeometry } from './print-args'
 import { initDocsAutoUpdater } from './updater'
 import { registerZoteroIpc, teardownZoteroIpc } from './zotero-ipc'
-import { openDocumentPrintDialog } from '../../../sheets/src/main/print-dialog'
+import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 
 /**
  * Docs main-process logic as an embeddable module: no top-level side effects.
@@ -5187,22 +5187,14 @@ export function registerDocsIpc(): void {
           ? fileName.replace(/\.docx$/i, '') + '.pdf'
           : 'Document.pdf'
       const owner = BrowserWindow.fromWebContents(event.sender)
-      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-docs-print-dlg-'))
       try {
-        const pdfPath = join(workDir, 'preview.pdf')
-        await writeFile(pdfPath, Buffer.from(base64, 'base64'))
-        /// Keep workDir until the dialog finishes — left-pane PDF + preload
-        /// + panel HTML all live there for the lifetime of the window.
-        return await openDocumentPrintDialog({
+        return await openDocumentPrintDialogFromPdf({
           parent: owner && !owner.isDestroyed() ? owner : null,
-          pdfPath,
-          workDir,
+          pdf: Buffer.from(base64, 'base64'),
           fileName: suggested,
         })
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
-      } finally {
-        await rm(workDir, { recursive: true, force: true }).catch(() => undefined)
       }
     },
   )

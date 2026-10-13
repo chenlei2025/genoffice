@@ -515,36 +515,15 @@ export default function App() {
       (filePathRef.current
         ? filePathRef.current.replace(/^.*[/\\]/, '').replace(/\.(md|markdown)$/i, '')
         : deriveAutoFileName(current)) || 'Untitled'
-    const frame = document.createElement('iframe')
-    frame.style.position = 'fixed'
-    frame.style.right = '100%'
-    frame.style.bottom = '100%'
-    frame.style.width = '0'
-    frame.style.height = '0'
-    frame.style.border = '0'
     try {
-      await new Promise<void>((resolve) => {
-        frame.onload = () => resolve()
-        frame.srcdoc = buildPrintHtml(current.view.dom, title)
-        document.body.appendChild(frame)
+      const result = await window.markdownApi.printDocument({
+        html: buildPrintHtml(current.view.dom, title),
+        suggestedName: title,
       })
-      const fdoc = frame.contentDocument
-      const fwin = frame.contentWindow
-      if (!fdoc || !fwin) return
-      // the export path passes printToPDF margins instead; the dialog needs @page
-      const pageStyle = fdoc.createElement('style')
-      pageStyle.textContent = '@page { margin: 0.6in; }'
-      fdoc.head.appendChild(pageStyle)
-      await Promise.all([...fdoc.images].map((img) => img.decode().catch(() => {})))
-      // resolve on afterprint so the frame survives until the dialog closes (cancel included)
-      await new Promise<void>((resolve) => {
-        fwin.addEventListener('afterprint', () => resolve())
-        fwin.print()
-      })
+      if (!result.ok && result.error) console.error('[markdown] print failed:', result.error)
     } catch (err) {
       console.error('[markdown] print failed:', err)
     } finally {
-      frame.remove()
       printingRef.current = false
     }
   }, [])

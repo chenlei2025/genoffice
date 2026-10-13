@@ -611,6 +611,8 @@ export const cs = {
   appPrintAlign: 'Zarovnání',
   appPrintCenterHorizontal: 'Vodorovně na střed',
   appPrintCenterVertical: 'Svisle na střed',
+  appPrintCenterHorizontalOff: 'Vodorovné zarovnání na střed vypnuto',
+  appPrintCenterVerticalOff: 'Svislé zarovnání na střed vypnuto',
   appPrintSent: 'Odesláno na tiskárnu.',
   appPrintCanceled: 'Tisk zrušen.',
   appPrintFailed: 'Nelze tisknout.',

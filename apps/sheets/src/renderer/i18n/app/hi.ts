@@ -605,6 +605,8 @@ export const hi = {
   appPrintAlign: 'संरेखण',
   appPrintCenterHorizontal: 'क्षैतिज केंद्र',
   appPrintCenterVertical: 'लंबवत केंद्र',
+  appPrintCenterHorizontalOff: 'क्षैतिज केंद्र बंद',
+  appPrintCenterVerticalOff: 'लंबवत केंद्र बंद',
   appPrintSent: 'प्रिंटर को भेज दिया गया।',
   appPrintCanceled: 'प्रिंट रद्द किया गया।',
   appPrintFailed: 'प्रिंट नहीं किया जा सका।',

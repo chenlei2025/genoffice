@@ -648,6 +648,8 @@ export const de = {
   appPrintAlign: 'Ausrichtung',
   appPrintCenterHorizontal: 'Horizontal zentrieren',
   appPrintCenterVertical: 'Vertikal zentrieren',
+  appPrintCenterHorizontalOff: 'Horizontale Zentrierung aus',
+  appPrintCenterVerticalOff: 'Vertikale Zentrierung aus',
   appPrintSent: 'An den Drucker gesendet.',
   appPrintCanceled: 'Drucken abgebrochen.',
   appPrintFailed: 'Drucken nicht möglich.',

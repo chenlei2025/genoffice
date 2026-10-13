@@ -63,6 +63,7 @@ const api: HtmlApi = {
     ipcRenderer.on(HTML_CHANNELS.printRequest, listener)
     return () => ipcRenderer.removeListener(HTML_CHANNELS.printRequest, listener)
   },
+  printDocument: (request) => ipcRenderer.invoke(HTML_CHANNELS.printDocument, request),
   exportDocx: (request) => ipcRenderer.invoke(HTML_CHANNELS.exportDocx, request),
   exportPdf: (request) => ipcRenderer.invoke(HTML_CHANNELS.exportPdf, request),
   exportHtml: (request) => ipcRenderer.invoke(HTML_CHANNELS.exportHtml, request),

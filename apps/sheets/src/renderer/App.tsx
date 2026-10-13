@@ -4495,11 +4495,18 @@ export function App({
 
   const activePageLayout = (() => {
     const worksheet = univerRef.current?.univerAPI.getActiveWorkbook()?.getActiveSheet()
-    const journalState = worksheet
-      ? (lazyWorkbookRef.current?.editJournal.pageSetup.get(worksheet.getSheetId()) ?? {})
+    const sheetId = worksheet?.getSheetId()
+    const journalState = sheetId
+      ? (lazyWorkbookRef.current?.editJournal.pageSetup.get(sheetId) ?? {})
       : {}
+    const fileSetup = sheetId
+      ? (lazyWorkbookRef.current?.sheetFilePageSetups.get(sheetId) ?? null)
+      : null
     return {
       ...journalState,
+      /// App default: both axes centered when journal/file omit the flags.
+      horizontalCentered: journalState.horizontalCentered ?? fileSetup?.horizontalCentered ?? true,
+      verticalCentered: journalState.verticalCentered ?? fileSetup?.verticalCentered ?? true,
       showGridlines:
         journalState.showGridlines ?? (worksheet ? !worksheet.hasHiddenGridLines() : true),
       showHeadings:
@@ -4507,7 +4514,7 @@ export function App({
         (worksheet
           ? worksheet.getSheet().getConfig().rowHeader.hidden !== BooleanNumber.TRUE
           : true),
-      pageBreakPreview: worksheet ? pageBreakPreviewSheets.has(worksheet.getSheetId()) : false,
+      pageBreakPreview: sheetId ? pageBreakPreviewSheets.has(sheetId) : false,
     }
   })()
 

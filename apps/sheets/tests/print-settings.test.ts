@@ -141,11 +141,21 @@ describe('resolveEffectivePageSetup', () => {
     expect(setup.margins.top).toBe(3)
     expect(setup.margins.left).toBe(0.98)
     expect(setup.printGridlines).toBe(true)
-    expect(setup.horizontalCentered).toBe(false)
+    expect(setup.horizontalCentered).toBe(true)
+    expect(setup.verticalCentered).toBe(true)
+    expect(resolveEffectivePageSetup({}, null, null).horizontalCentered).toBe(true)
+    expect(resolveEffectivePageSetup({}, null, null).verticalCentered).toBe(true)
     expect(
-      resolveEffectivePageSetup({}, { horizontalCentered: true, verticalCentered: true }, null)
+      resolveEffectivePageSetup({}, { horizontalCentered: false, verticalCentered: false }, null)
         .verticalCentered,
-    ).toBe(true)
+    ).toBe(false)
+    expect(
+      resolveEffectivePageSetup(
+        { horizontalCentered: false },
+        { horizontalCentered: true, verticalCentered: true },
+        null,
+      ).horizontalCentered,
+    ).toBe(false)
     expect(setup.printAreas).toEqual(['A1:K84'])
     expect(setup.printTitles).toBe('17:17')
     expect(setup.footer).toEqual({ center: 'Seite &P von &N' })

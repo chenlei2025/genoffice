@@ -122,15 +122,16 @@ describe('buildPrintDocumentHtml', () => {
     expect(handout).toContain('src="e&amp;f&lt;g&gt;"')
   })
 
-  it('preview mode adds page badges with the total page count', () => {
+  it('preview mode adds selectable page numbers under each sheet', () => {
     const html = buildPrintDocumentHtml({
       srcs: srcs(5),
       ratio: 16 / 9,
       layout: 'handout2',
       preview: true,
     })
-    expect(html).toContain("content: counter(pg) ' / 3';")
-    expect(html).toContain('counter-reset: pg;')
+    expect(html).toContain('class="preview-page-pick" data-page="1"')
+    expect(html).toContain('class="preview-page-pick" data-page="3"')
+    expect(html).toContain('aria-pressed="true"')
   })
 })
 

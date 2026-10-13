@@ -620,6 +620,8 @@ export const ru = {
   appPrintAlign: 'Выравнивание',
   appPrintCenterHorizontal: 'По центру горизонтально',
   appPrintCenterVertical: 'По центру вертикально',
+  appPrintCenterHorizontalOff: 'Горизонтальное выравнивание по центру выкл.',
+  appPrintCenterVerticalOff: 'Вертикальное выравнивание по центру выкл.',
   appPrintSent: 'Отправлено на принтер.',
   appPrintCanceled: 'Печать отменена.',
   appPrintFailed: 'Не удалось напечатать.',

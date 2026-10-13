@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePrintRange } from '../src/renderer/print-range'
+import { compactPrintRange, parsePrintRange } from '../src/renderer/print-range'
 
 describe('parsePrintRange', () => {
   it('parses commas and ranges', () => {
@@ -19,5 +19,15 @@ describe('parsePrintRange', () => {
     expect(parsePrintRange('0', 5)).toBeNull()
     expect(parsePrintRange('6', 5)).toBeNull()
     expect(parsePrintRange('4-2', 5)).toBeNull()
+  })
+})
+
+describe('compactPrintRange', () => {
+  it('joins contiguous pages', () => {
+    expect(compactPrintRange([1, 2, 3, 5, 7, 8])).toBe('1-3,5,7-8')
+  })
+
+  it('returns empty for no pages', () => {
+    expect(compactPrintRange([])).toBe('')
   })
 })

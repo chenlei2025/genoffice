@@ -193,6 +193,18 @@ export function handlePageLayoutCommand(ctx: PageLayoutContext, rest: string): v
         value === '1' ? t('appHeadingsWillPrint') : t('appHeadingsWontPrint'),
       )
       return
+    case 'center-h':
+      recordDirect(
+        { horizontalCentered: value === '1' },
+        value === '1' ? t('appPrintCenterHorizontal') : t('appPrintCenterHorizontalOff'),
+      )
+      return
+    case 'center-v':
+      recordDirect(
+        { verticalCentered: value === '1' },
+        value === '1' ? t('appPrintCenterVertical') : t('appPrintCenterVerticalOff'),
+      )
+      return
     case 'print-area': {
       if (value === 'clear') {
         record({ printArea: null }, t('appPrintAreaCleared'))

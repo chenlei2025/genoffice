@@ -34,6 +34,7 @@ import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { ImageExportSessions } from './image-export'
 import { printMarkdownPdf } from './print-pdf'
+import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { atomicWriteFile } from './atomic-write'
 import {
   copyImageIntoOwnedAssets,
@@ -62,6 +63,7 @@ import type {
   ExportPdfRequest,
   ImageExportPreparation,
   ExportResult,
+  PrintDocumentResult,
   ImageData,
   SaveMarkdownRequest,
   SaveMarkdownResult,
@@ -959,6 +961,31 @@ function registerMarkdownIpc(): void {
         if (picked.canceled || !picked.filePath) return { ok: true, canceled: true }
         await writeFile(picked.filePath, bytes)
         return { ok: true, path: picked.filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    MARKDOWN_CHANNELS.printDocument,
+    async (e, request: ExportPdfRequest): Promise<PrintDocumentResult> => {
+      if (typeof request?.html !== 'string' || !request.html) {
+        return { ok: false, error: 'markdown: bad print request' }
+      }
+      const safeName =
+        String(request.suggestedName || tm('untitledFile'))
+          .replace(/[/\\:*?"<>|]/g, '_')
+          .slice(0, 80)
+          .trim() || tm('untitledFile')
+      const owner = BrowserWindow.fromWebContents(e.sender)
+      try {
+        const pdf = await printMarkdownPdf(request.html)
+        return await openDocumentPrintDialogFromPdf({
+          parent: owner && !owner.isDestroyed() ? owner : null,
+          pdf,
+          fileName: `${safeName}.pdf`,
+        })
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }

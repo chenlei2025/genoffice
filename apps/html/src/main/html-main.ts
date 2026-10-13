@@ -44,6 +44,7 @@ import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
+import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { atomicWriteFile } from './atomic-write'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
@@ -85,6 +86,7 @@ import type {
   ExportFormat,
   ExportPdfRequest,
   ExportResult,
+  PrintDocumentResult,
   ImageData,
   SaveHtmlRequest,
   SaveHtmlResult,
@@ -1663,6 +1665,31 @@ function registerHtmlIpc(): void {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       } finally {
         await driver?.close()
+        await rm(workDir, { recursive: true, force: true }).catch(() => {})
+      }
+    },
+  )
+
+  ipcMain.handle(
+    HTML_CHANNELS.printDocument,
+    async (e, request: ExportPdfRequest): Promise<PrintDocumentResult> => {
+      if (typeof request?.html !== 'string') {
+        return { ok: false, error: 'html: bad print request' }
+      }
+      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-html-print-'))
+      const owner = BrowserWindow.fromWebContents(e.sender)
+      try {
+        const docPath = savePathByWc.get(e.sender.id)
+        const pdf = await renderPrintPdf(request.html, docPath, workDir)
+        const name = exportFileName(request.suggestedName)
+        return await openDocumentPrintDialogFromPdf({
+          parent: owner && !owner.isDestroyed() ? owner : null,
+          pdf,
+          fileName: `${name}.pdf`,
+        })
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
         await rm(workDir, { recursive: true, force: true }).catch(() => {})
       }
     },

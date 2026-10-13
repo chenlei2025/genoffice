@@ -599,6 +599,8 @@ export const vi = {
   appPrintAlign: 'Căn chỉnh',
   appPrintCenterHorizontal: 'Căn giữa ngang',
   appPrintCenterVertical: 'Căn giữa dọc',
+  appPrintCenterHorizontalOff: 'Đã tắt căn giữa ngang',
+  appPrintCenterVerticalOff: 'Đã tắt căn giữa dọc',
   appPrintSent: 'Đã gửi tới máy in.',
   appPrintCanceled: 'Đã hủy in.',
   appPrintFailed: 'Không thể in.',
