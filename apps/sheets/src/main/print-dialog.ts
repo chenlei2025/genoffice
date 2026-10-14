@@ -1467,9 +1467,10 @@ const PREVIEW_FIT_SCRIPT = `(() => {
   let layoutDirection = 'ltr-ttb'
   let selectedPages = null
   let logicalPageCount = 0
-  const VIRTUALIZE_AFTER = 1
-  const VISIBLE_BUFFER = 0
-  const MOUNT_IDLE_MS = 70
+  // Mount only nearby sheet clones — full workbook DOMs are too heavy to keep live.
+  const VIRTUALIZE_AFTER = 8
+  const VISIBLE_BUFFER = 2
+  const MOUNT_IDLE_MS = 80
   const pageOf = ${JSON.stringify(label('appPrintPageOf'))}
   const nupCellIndex = (fillIndex, cols, rows, direction) => {
     const total = cols * rows
@@ -1862,10 +1863,10 @@ const PREVIEW_FIT_SCRIPT = `(() => {
   }
 
   /// Mount live DOM only for visible unfrozen slots. Never touch frozen images.
-  /// During active scrolling, skip mounts so the compositor stays free.
-  const syncVisibleCards = (force) => {
+  /// Keep mounting during scroll so the left pane never shows long blank stretches.
+  let mountRaf = 0
+  const syncVisibleCards = () => {
     if (!built || pageSpecs.length === 0) return
-    if (scrolling && !force) return
     const { first, last } = visibleRange()
     const virtualize = pageSpecs.length > VIRTUALIZE_AFTER
     for (let i = 0; i < pages.childElementCount; i++) {
@@ -1889,7 +1890,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
           if (area) applyAreaPaneTransform(area)
         }
       } else if (slot.dataset.live === '1') {
-        // Drop live DOM off-screen; keep empty paper until frozen/revisit.
+        // Drop live DOM far off-screen; keep empty paper until revisit.
         slot.replaceChildren()
         slot.dataset.empty = '1'
         slot.dataset.live = '0'
@@ -1898,11 +1899,16 @@ const PREVIEW_FIT_SCRIPT = `(() => {
   }
 
   const scheduleMount = () => {
+    if (mountRaf) return
+    mountRaf = requestAnimationFrame(() => {
+      mountRaf = 0
+      syncVisibleCards()
+    })
     if (mountTimer) clearTimeout(mountTimer)
     mountTimer = setTimeout(() => {
       mountTimer = 0
       scrolling = false
-      syncVisibleCards(true)
+      syncVisibleCards()
     }, MOUNT_IDLE_MS)
   }
 
@@ -1916,6 +1922,10 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     if (mountTimer) {
       clearTimeout(mountTimer)
       mountTimer = 0
+    }
+    if (mountRaf) {
+      cancelAnimationFrame(mountRaf)
+      mountRaf = 0
     }
     pages.innerHTML = ''
     pageSpecs = []
@@ -2040,7 +2050,7 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     }
     sizeSlots()
     scrolling = false
-    syncVisibleCards(true)
+    syncVisibleCards()
     updatePageLabel()
   }
 
@@ -2101,22 +2111,27 @@ const PREVIEW_FIT_SCRIPT = `(() => {
     return true
   }
   /// Live+mostly-visible pages ready for main-process capturePage.
+  /// Always the paper slot only — never the wrap (which includes page-pick pills).
   window.__freezeCandidates = () => {
     if (!built || scrolling) return []
     const host = scroll.getBoundingClientRect()
     const out = []
     for (let i = 0; i < pages.childElementCount; i++) {
-      const slot = slotOf(pages.children[i])
-      if (slot.dataset.frozen === '1' || slot.dataset.live !== '1') continue
+      const wrap = pages.children[i]
+      const slot = wrap && wrap.querySelector
+        ? wrap.querySelector('.preview-card-slot')
+        : null
+      if (!slot || slot.dataset.frozen === '1' || slot.dataset.live !== '1') continue
       const r = slot.getBoundingClientRect()
       const overlap = Math.min(r.bottom, host.bottom) - Math.max(r.top, host.top)
       if (overlap < r.height * 0.8 || r.width < 8 || r.height < 8) continue
+      // Inset 1px so subpixel / shadow bleed cannot pull in the pick row under the card.
       out.push({
         index: i,
-        x: Math.round(r.x),
-        y: Math.round(r.y),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
+        x: Math.round(r.x) + 1,
+        y: Math.round(r.y) + 1,
+        width: Math.max(1, Math.round(r.width) - 2),
+        height: Math.max(1, Math.round(r.height) - 2),
       })
       if (out.length >= 2) break
     }
@@ -2308,12 +2323,20 @@ html, body {
   color: CanvasText;
   overflow: hidden;
 }
+#preview-fit {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: Canvas;
+}
 #scroll {
   box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
   overflow: auto;
-  padding: 16px 12px 24px;
+  padding: 16px 12px 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2326,6 +2349,17 @@ html, body {
 #scroll::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, CanvasText 26%, transparent);
   border-radius: 4px;
+}
+#preview-page-label {
+  flex: none;
+  text-align: center;
+  padding: 8px 14px 12px;
+  font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, CanvasText 62%, transparent);
+  background: Canvas;
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  user-select: none;
 }
 .card {
   flex: none;
@@ -2396,17 +2430,24 @@ html, body {
   font: 13px/1.4 system-ui, sans-serif;
 }
 </style></head><body>
-<div id="scroll"><p class="loading">…</p></div>
+<div id="preview-fit">
+  <div id="scroll"><p class="loading">…</p></div>
+  <div id="preview-page-label"></div>
+</div>
 <script type="module">
 import * as pdfjs from './pdf.min.mjs';
 pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
 const scroll = document.getElementById('scroll');
+const pageLabel = document.getElementById('preview-page-label');
 const CSS_PX = 96;
 const pageNodes = [];
 let pendingLayout = null;
 let userZoom = 1;
 let fitRaf = 0;
+let labelRaf = 0;
+let lastLabel = '';
 let selectedPages = null;
+const pageOf = ${JSON.stringify(label('appPrintPageOf'))};
 let resolveReady;
 let readySettled = false;
 window.__pdfReady = new Promise((resolve) => { resolveReady = resolve; });
@@ -2532,24 +2573,155 @@ window.__setSelectedPages = (list) => {
   paintPicks();
   return true;
 };
+let layoutSnap = null;
 window.__getCurrentPage = () => {
-  const cards = [...scroll.querySelectorAll('.card-wrap, :scope > .card')];
-  if (cards.length === 0) return 1;
+  const wraps = [...scroll.querySelectorAll('.card-wrap')];
+  if (wraps.length === 0) return 1;
   const mid = scroll.scrollTop + scroll.clientHeight * 0.35;
-  let current = 1;
-  for (let i = 0; i < cards.length; i++) {
-    const top = cards[i].offsetTop;
-    const bottom = top + cards[i].offsetHeight;
-    if (mid >= top && mid < bottom) return i + 1;
-    if (mid >= bottom) current = i + 1;
+  let sheet = 1;
+  for (let i = 0; i < wraps.length; i++) {
+    const top = wraps[i].offsetTop;
+    const bottom = top + wraps[i].offsetHeight;
+    if (mid >= top && mid < bottom) {
+      sheet = i + 1;
+      break;
+    }
+    if (mid >= bottom) sheet = i + 1;
   }
-  return Math.min(cards.length, Math.max(1, current));
+  const perSheet = layoutSnap ? layoutSnap.perSheet : 1;
+  return Math.min(pageNodes.length, (sheet - 1) * perSheet + 1);
 };
 /// Fit paper cards into the left pane width (default zoom-to-fit).
 const paneViewScale = (paperW) => {
   const paneW = Math.max(scroll.clientWidth - 24, 40);
   if (!(paperW > 0)) return 1;
   return Math.max(0.12, Math.min(4, (paneW / paperW) * userZoom));
+};
+const styleCard = (card, grid, dispW, dispH, padT, padR, padB, padL, hairline, cols, rows, sheetTransform) => {
+  card.style.width = Math.round(dispW) + 'px';
+  card.style.height = Math.round(dispH) + 'px';
+  card.style.padding =
+    Math.round(padT) + 'px ' + Math.round(padR) + 'px ' +
+    Math.round(padB) + 'px ' + Math.round(padL) + 'px';
+  card.style.alignItems = 'stretch';
+  card.style.justifyContent = 'stretch';
+  if (hairline) {
+    card.style.outline = '1px solid #000';
+    card.style.outlineOffset = '-1px';
+  } else {
+    card.style.outline = '';
+    card.style.outlineOffset = '';
+  }
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+  grid.style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
+  grid.style.transform = sheetTransform;
+  grid.style.transformOrigin = 'center center';
+};
+const fillSheet = (grid, chunk, cols, rows, direction, innerW, innerH, scale) => {
+  const cells = [...grid.querySelectorAll(':scope > .nup-cell')];
+  while (cells.length < cols * rows) {
+    const cell = document.createElement('div');
+    cell.className = 'nup-cell';
+    grid.appendChild(cell);
+    cells.push(cell);
+  }
+  while (cells.length > cols * rows) {
+    cells.pop().remove();
+  }
+  for (const cell of cells) cell.replaceChildren();
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
+  for (let p = 0; p < chunk.length; p++) {
+    const cell = cells[nupCellIndex(p, cols, rows, direction)];
+    if (!cell) continue;
+    const node = chunk[p];
+    const natW = node.pageWIn * CSS_PX;
+    const natH = node.pageHIn * CSS_PX;
+    const fit = Math.min(cellW / natW, cellH / natH) * scale;
+    const tw = Math.max(1, Math.floor(natW * fit));
+    const th = Math.max(1, Math.floor(natH * fit));
+    node.canvas.style.width = tw + 'px';
+    node.canvas.style.height = th + 'px';
+    node.stage.style.width = tw + 'px';
+    node.stage.style.height = th + 'px';
+    node.stage.style.transform = '';
+    cell.appendChild(node.stage);
+  }
+};
+const syncPickRow = (wrap, chunk) => {
+  let picks = wrap.querySelector('.preview-page-picks');
+  const nums = chunk.map((n) => n.pageIndex);
+  const same =
+    picks &&
+    picks.children.length === nums.length &&
+    [...picks.children].every((btn, i) => btn.dataset.page === String(nums[i]));
+  if (same) return;
+  if (picks) picks.remove();
+  picks = document.createElement('div');
+  picks.className = 'preview-page-picks';
+  for (const n of nums) picks.appendChild(makePickBtn(n));
+  wrap.appendChild(picks);
+};
+let observeSheets = () => {};
+const createSheetWrap = (sheetIndex, snap) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'card-wrap';
+  wrap.dataset.sheetIndex = String(sheetIndex);
+  const card = document.createElement('div');
+  card.className = 'card';
+  const grid = document.createElement('div');
+  grid.className = 'nup-grid';
+  for (let c = 0; c < snap.perSheet; c++) {
+    const cell = document.createElement('div');
+    cell.className = 'nup-cell';
+    grid.appendChild(cell);
+  }
+  card.appendChild(grid);
+  wrap.appendChild(card);
+  return wrap;
+};
+const paintSheetWrap = (wrap, sheetIndex, snap) => {
+  const card = wrap.querySelector('.card');
+  const grid = card && card.querySelector('.nup-grid');
+  if (!card || !grid) return;
+  const chunk = pageNodes.slice(
+    sheetIndex * snap.perSheet,
+    sheetIndex * snap.perSheet + snap.perSheet,
+  );
+  styleCard(
+    card, grid, snap.dispW, snap.dispH, snap.padT, snap.padR, snap.padB, snap.padL,
+    snap.hairline, snap.cols, snap.rows, snap.sheetTransform,
+  );
+  fillSheet(grid, chunk, snap.cols, snap.rows, snap.direction, snap.innerW, snap.innerH, snap.scale);
+  syncPickRow(wrap, chunk);
+};
+/// Keep every lightweight card shell mounted (scroll position stays stable).
+/// Only page bitmaps are lazy — unmounting wraps with estimated spacers caused
+/// jump/blank/wrong-page bugs while scrolling the left preview.
+const syncSheetList = (force) => {
+  const snap = layoutSnap;
+  if (!snap || snap.expected === 0) return;
+  const existing = [...scroll.querySelectorAll(':scope > .card-wrap')];
+  if (existing.length === snap.expected && existing.length > 0) {
+    if (force) {
+      for (let i = 0; i < snap.expected; i++) paintSheetWrap(existing[i], i, snap);
+      paintPicks();
+      notifySelection();
+      observeSheets();
+    }
+    schedulePageLabel();
+    return;
+  }
+  scroll.replaceChildren();
+  for (let i = 0; i < snap.expected; i++) {
+    const wrap = createSheetWrap(i, snap);
+    paintSheetWrap(wrap, i, snap);
+    scroll.appendChild(wrap);
+  }
+  paintPicks();
+  notifySelection();
+  schedulePageLabel();
+  observeSheets();
 };
 const applyPrintLayoutNow = (layout) => {
   if (!layout || !scroll || pageNodes.length === 0) return false;
@@ -2580,75 +2752,45 @@ const applyPrintLayoutNow = (layout) => {
   if (layout.flipHorizontal) sheetTransforms.push('scaleX(-1)');
   const sheetTransform = sheetTransforms.length ? sheetTransforms.join(' ') : '';
   const hairline = layout.pageBorder === 'hairline';
-  scroll.replaceChildren();
-  for (let i = 0; i < pageNodes.length; i += perSheet) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.style.width = Math.round(dispW) + 'px';
-    card.style.height = Math.round(dispH) + 'px';
-    card.style.padding =
-      Math.round(padT) + 'px ' + Math.round(padR) + 'px ' +
-      Math.round(padB) + 'px ' + Math.round(padL) + 'px';
-    card.style.alignItems = 'stretch';
-    card.style.justifyContent = 'stretch';
-    if (hairline) {
-      card.style.outline = '1px solid #000';
-      card.style.outlineOffset = '-1px';
-    } else {
-      card.style.outline = '';
-      card.style.outlineOffset = '';
-    }
-    const grid = document.createElement('div');
-    grid.className = 'nup-grid';
-    grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
-    grid.style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
-    grid.style.transform = sheetTransform;
-    grid.style.transformOrigin = 'center center';
-    const cells = [];
-    for (let c = 0; c < perSheet; c++) {
-      const cell = document.createElement('div');
-      cell.className = 'nup-cell';
-      cells.push(cell);
-      grid.appendChild(cell);
-    }
-    const cellW = innerW / cols;
-    const cellH = innerH / rows;
-    const chunk = pageNodes.slice(i, i + perSheet);
-    for (let p = 0; p < chunk.length; p++) {
-      const cell = cells[nupCellIndex(p, cols, rows, direction)];
-      if (!cell) continue;
-      const node = chunk[p];
-      const natW = node.pageWIn * CSS_PX;
-      const natH = node.pageHIn * CSS_PX;
-      const fit = Math.min(cellW / natW, cellH / natH) * scale;
-      const tw = Math.max(1, Math.floor(natW * fit));
-      const th = Math.max(1, Math.floor(natH * fit));
-      node.canvas.style.width = tw + 'px';
-      node.canvas.style.height = th + 'px';
-      node.stage.style.width = tw + 'px';
-      node.stage.style.height = th + 'px';
-      node.stage.style.transform = '';
-      cell.appendChild(node.stage);
-    }
-    card.appendChild(grid);
-    const wrap = document.createElement('div');
-    wrap.className = 'card-wrap';
-    wrap.appendChild(card);
-    const picks = document.createElement('div');
-    picks.className = 'preview-page-picks';
-    for (let p = 0; p < chunk.length; p++) {
-      picks.appendChild(makePickBtn(chunk[p].pageIndex));
-    }
-    wrap.appendChild(picks);
-    scroll.appendChild(wrap);
-  }
-  paintPicks();
-  notifySelection();
+  const expected = Math.ceil(pageNodes.length / perSheet);
+  layoutSnap = {
+    dispW, dispH, padT, padR, padB, padL, innerW, innerH, scale,
+    cols, rows, perSheet, direction, sheetTransform, hairline, expected,
+  };
+  syncSheetList(true);
   return true;
 };
-window.__applyPrintLayout = (layout) => {
-  pendingLayout = layout;
-  return applyPrintLayoutNow(layout);
+const updatePageLabel = () => {
+  if (!pageLabel) return;
+  const wraps = [...scroll.querySelectorAll('.card-wrap')];
+  const total = Math.max(1, pageNodes.length);
+  let sheet = 1;
+  if (wraps.length > 0) {
+    const mid = scroll.scrollTop + scroll.clientHeight * 0.35;
+    for (let i = 0; i < wraps.length; i++) {
+      const top = wraps[i].offsetTop;
+      const bottom = top + wraps[i].offsetHeight;
+      if (mid >= top && mid < bottom) {
+        sheet = i + 1;
+        break;
+      }
+      if (mid >= bottom) sheet = i + 1;
+    }
+  }
+  const perSheet = layoutSnap ? layoutSnap.perSheet : 1;
+  const pageNo = Math.min(total, (sheet - 1) * perSheet + 1);
+  const text = pageOf.replace('{current}', String(pageNo)).replace('{total}', String(total));
+  if (text !== lastLabel) {
+    lastLabel = text;
+    pageLabel.textContent = text;
+  }
+};
+const schedulePageLabel = () => {
+  if (labelRaf) return;
+  labelRaf = requestAnimationFrame(() => {
+    labelRaf = 0;
+    updatePageLabel();
+  });
 };
 window.__fitPreview = () => {
   if (pendingLayout) applyPrintLayoutNow(pendingLayout);
@@ -2680,33 +2822,129 @@ try {
   const doc = await pdfjs.getDocument({ url: './preview.pdf', useWasm: false }).promise;
   const total = doc.numPages;
   scroll.replaceChildren();
-  // Rasterize once; Layout pane (N-up / flip / border) rearranges via
-  // __applyPrintLayout without re-rendering PDF pages. Unblock the parent
-  // after the first page so the dialog is not stuck waiting on long jobs.
-  const renderScale = 1.5;
-  for (let i = 1; i <= total; i++) {
-    const page = await doc.getPage(i);
-    const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: renderScale });
+  // 1) Probe page boxes in parallel (no raster) so many-page PDFs open quickly.
+  // 2) Paint placeholders, unblock the dialog, then rasterize on demand.
+  const metas = new Array(total);
+  let probeNext = 1;
+  const probeConc = Math.min(16, Math.max(1, total));
+  await Promise.all(Array.from({ length: probeConc }, async () => {
+    for (;;) {
+      const i = probeNext++;
+      if (i > total) return;
+      const page = await doc.getPage(i);
+      const base = page.getViewport({ scale: 1 });
+      metas[i - 1] = {
+        pageIndex: i,
+        pageWIn: base.width / 72,
+        pageHIn: base.height / 72,
+      };
+      page.cleanup();
+    }
+  }));
+  // Fewer pixels for long docs — raster cost dominates scroll jank in print preview.
+  const renderScale = total > 100 ? 0.55 : total > 40 ? 0.75 : total > 15 ? 0.95 : 1.25;
+  let renderInflight = 0;
+  const RENDER_CONC = 2;
+  const renderQueue = [];
+  for (const meta of metas) {
     const stage = document.createElement('div');
     stage.className = 'stage';
     const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const pageWIn = base.width / 72;
-    const pageHIn = base.height / 72;
-    canvas.dataset.pageWIn = String(pageWIn);
-    canvas.dataset.pageHIn = String(pageHIn);
-    canvas.style.width = Math.floor(pageWIn * CSS_PX) + 'px';
-    canvas.style.height = Math.floor(pageHIn * CSS_PX) + 'px';
+    canvas.width = 1;
+    canvas.height = 1;
+    canvas.dataset.pageWIn = String(meta.pageWIn);
+    canvas.dataset.pageHIn = String(meta.pageHIn);
+    canvas.style.width = Math.floor(meta.pageWIn * CSS_PX) + 'px';
+    canvas.style.height = Math.floor(meta.pageHIn * CSS_PX) + 'px';
+    canvas.style.background = '#fff';
     stage.appendChild(canvas);
-    pageNodes.push({ stage, canvas, pageWIn, pageHIn, pageIndex: i });
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    page.cleanup();
-    showPendingOrFallback();
-    if (i === 1) markReady();
+    pageNodes.push({
+      stage,
+      canvas,
+      pageWIn: meta.pageWIn,
+      pageHIn: meta.pageHIn,
+      pageIndex: meta.pageIndex,
+      rendered: false,
+      rendering: false,
+    });
   }
+  const pumpRenderQueue = () => {
+    while (renderInflight < RENDER_CONC && renderQueue.length) {
+      const node = renderQueue.shift();
+      if (!node || node.rendered || node.rendering) continue;
+      renderInflight++;
+      void (async () => {
+        try {
+          await ensureRendered(node);
+        } finally {
+          renderInflight--;
+          pumpRenderQueue();
+        }
+      })();
+    }
+  };
+  const queueRender = (node) => {
+    if (!node || node.rendered || node.rendering) return;
+    if (!renderQueue.includes(node)) renderQueue.push(node);
+    pumpRenderQueue();
+  };
+  const ensureRendered = async (node) => {
+    if (!node || node.rendered || node.rendering) return;
+    node.rendering = true;
+    try {
+      const page = await doc.getPage(node.pageIndex);
+      const viewport = page.getViewport({ scale: renderScale });
+      const w = Math.floor(viewport.width);
+      const h = Math.floor(viewport.height);
+      // Offscreen first — assigning canvas.width clears the visible bitmap (white flash).
+      const offscreen = document.createElement('canvas');
+      offscreen.width = w;
+      offscreen.height = h;
+      await page.render({ canvas: offscreen, viewport }).promise;
+      page.cleanup();
+      node.canvas.width = w;
+      node.canvas.height = h;
+      const ctx = node.canvas.getContext('2d');
+      if (ctx) ctx.drawImage(offscreen, 0, 0);
+      offscreen.width = 0;
+      offscreen.height = 0;
+      node.rendered = true;
+    } finally {
+      node.rendering = false;
+    }
+  };
+  const io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const idx = Number(entry.target.dataset.sheetIndex);
+      if (!(idx >= 0) || !layoutSnap) continue;
+      const chunk = pageNodes.slice(
+        idx * layoutSnap.perSheet,
+        idx * layoutSnap.perSheet + layoutSnap.perSheet,
+      );
+      for (const node of chunk) queueRender(node);
+    }
+  }, { root: scroll, rootMargin: '160px 0px' });
+  observeSheets = () => {
+    io.disconnect();
+    for (const wrap of scroll.querySelectorAll('.card-wrap')) {
+      io.observe(wrap);
+    }
+  };
+  const paint = () => {
+    showPendingOrFallback();
+    observeSheets();
+    schedulePageLabel();
+  };
+  window.__applyPrintLayout = (layout) => {
+    pendingLayout = layout;
+    return applyPrintLayoutNow(layout);
+  };
+  scroll.addEventListener('scroll', schedulePageLabel, { passive: true });
+  paint();
+  markReady();
+  // First sheet immediately; the rest when their card scrolls into view.
+  if (pageNodes[0]) queueRender(pageNodes[0]);
   new ResizeObserver(scheduleFit).observe(scroll);
   window.addEventListener('resize', scheduleFit);
   window.addEventListener('wheel', (event) => {
@@ -2721,7 +2959,6 @@ try {
   p.textContent = String(err && err.message ? err.message : err);
   scroll.appendChild(p);
 } finally {
-  showPendingOrFallback();
   markReady();
 }
 </script>
@@ -2872,37 +3109,59 @@ async function freezeVisiblePreviewPages(
     return
   }
   if (!Array.isArray(candidates) || candidates.length === 0) return
-  for (const candidate of candidates) {
-    if (win.isDestroyed() || generation.current !== mine) return
-    if (
-      !candidate ||
-      !Number.isFinite(candidate.index) ||
-      candidate.width < 8 ||
-      candidate.height < 8
-    ) {
-      continue
-    }
-    // One frame for the live card to paint before capture.
-    await new Promise<void>((resolve) => setTimeout(resolve, 16))
-    if (win.isDestroyed() || generation.current !== mine) return
+  const setPreviewChromeHidden = async (hidden: boolean) => {
+    if (win.isDestroyed()) return
     try {
-      const image = await win.webContents.capturePage({
-        x: Math.max(0, Math.round(candidate.x)),
-        y: Math.max(0, Math.round(candidate.y)),
-        width: Math.min(Math.round(candidate.width), 4096),
-        height: Math.min(Math.round(candidate.height), 4096),
-      })
-      if (image.isEmpty() || generation.current !== mine) continue
-      const dataUrl = image.toDataURL()
       await win.webContents.executeJavaScript(
         `(() => {
-          const w = document.getElementById('preview-frame')?.contentWindow
-          return w && w.__applyPageBitmap && w.__applyPageBitmap(${Math.floor(candidate.index)}, ${JSON.stringify(dataUrl)})
+          const doc = document.getElementById('preview-frame')?.contentDocument
+          if (!doc) return
+          const v = ${hidden ? "'hidden'" : "''"}
+          for (const el of doc.querySelectorAll('.preview-page-picks, #preview-page-label')) {
+            el.style.visibility = v
+          }
         })()`,
       )
     } catch {
-      /* resize / navigation race — skip this page */
+      /* preview torn down */
     }
+  }
+  await setPreviewChromeHidden(true)
+  try {
+    for (const candidate of candidates) {
+      if (win.isDestroyed() || generation.current !== mine) return
+      if (
+        !candidate ||
+        !Number.isFinite(candidate.index) ||
+        candidate.width < 8 ||
+        candidate.height < 8
+      ) {
+        continue
+      }
+      // One frame for the live card to paint before capture.
+      await new Promise<void>((resolve) => setTimeout(resolve, 16))
+      if (win.isDestroyed() || generation.current !== mine) return
+      try {
+        const image = await win.webContents.capturePage({
+          x: Math.max(0, Math.round(candidate.x)),
+          y: Math.max(0, Math.round(candidate.y)),
+          width: Math.min(Math.round(candidate.width), 4096),
+          height: Math.min(Math.round(candidate.height), 4096),
+        })
+        if (image.isEmpty() || generation.current !== mine) continue
+        const dataUrl = image.toDataURL()
+        await win.webContents.executeJavaScript(
+          `(() => {
+            const w = document.getElementById('preview-frame')?.contentWindow
+            return w && w.__applyPageBitmap && w.__applyPageBitmap(${Math.floor(candidate.index)}, ${JSON.stringify(dataUrl)})
+          })()`,
+        )
+      } catch {
+        /* resize / navigation race — skip this page */
+      }
+    }
+  } finally {
+    await setPreviewChromeHidden(false)
   }
 }
 
@@ -2989,17 +3248,11 @@ export async function openCombinedPrintDialog(args: {
   let fittedPage = ''
   let previewFramePath = ''
   const freezeGen = { current: 0 }
-  let freezeBusy = false
-  const freezeTimer = documentMode
-    ? undefined
-    : setInterval(() => {
-        if (freezeBusy || win.isDestroyed()) return
-        const mine = freezeGen.current
-        freezeBusy = true
-        void freezeVisiblePreviewPages(win, freezeGen, mine).finally(() => {
-          freezeBusy = false
-        })
-      }, 120)
+  // Freeze-to-bitmap via capturePage is disabled: HiDPI / iframe coordinates kept
+  // baking the blue page-pick pills (and page label) into the paper image, so Word
+  // and Excel previews showed duplicate page numbers. Live virtualization above
+  // is enough for scroll performance.
+  const freezeTimer: ReturnType<typeof setInterval> | undefined = undefined
   /// Apply layout into the panel's preview iframe (same origin as the sidebar).
   const applyPreviewLayout = async (layout: PreviewLayout): Promise<boolean> => {
     if (win.isDestroyed()) return false

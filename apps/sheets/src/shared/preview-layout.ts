@@ -256,10 +256,8 @@ export function previewLayoutCss(layout: PreviewLayout): string {
       0 0 0 1px color-mix(in srgb, CanvasText 14%, transparent),
       0 1px 2px color-mix(in srgb, CanvasText 10%, transparent),
       0 6px 18px color-mix(in srgb, CanvasText 12%, transparent);
-    /* Layout size is already pane-scaled; off-screen slots can be skipped. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 400px;
-    contain: strict;
+    /* No content-visibility: it ghosted page-pick pills into neighboring cards. */
+    contain: layout paint style;
   }
   .preview-card-slot[data-empty="1"] {
     /* Lightweight paper placeholder while the heavy sheet DOM is unmounted. */

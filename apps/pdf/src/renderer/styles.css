@@ -1055,6 +1055,12 @@ button {
   margin-bottom: 16px;
 }
 
+.pdf-row-spacer {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
 /* Night reading: invert only the page bitmap; overlays (markup/form/drawing) are separate in the DOM */
 .pdf-night .pdf-page-content canvas {
   filter: invert(1) hue-rotate(180deg);

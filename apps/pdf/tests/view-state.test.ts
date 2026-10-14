@@ -5,6 +5,7 @@ import {
   captureViewState,
   captureZoomAnchor,
   loadViewState,
+  rowWindowForScroll,
   saveViewState,
   zoomAnchorY,
 } from '../src/renderer/view-state'
@@ -208,5 +209,44 @@ describe('captureZoomAnchor / zoomAnchorY', () => {
     expect(anchor?.content).toBe(800)
     expect(captureZoomAnchor({ y: 100, rowHeights: [], gap, scale: 1 })).toBeNull()
     expect(captureZoomAnchor({ y: 100, rowHeights: heights, gap, scale: 0 })).toBeNull()
+  })
+})
+
+describe('rowWindowForScroll', () => {
+  const heights = [800, 800, 600, 800, 800]
+  const gap = 16
+  const total = () => {
+    let y = gap
+    for (const h of heights) y += h + gap
+    return y
+  }
+
+  it('pads keep the full scroll height', () => {
+    const win = rowWindowForScroll({
+      scrollTop: 900,
+      clientHeight: 600,
+      rowHeights: heights,
+      gap,
+      scale: 1,
+      buffer: 1,
+    })
+    let mounted = 0
+    for (let i = win.from; i <= win.to; i++) mounted += gap + heights[i]!
+    expect(win.topPad + mounted + win.bottomPad).toBe(total())
+  })
+
+  it('includes a buffer around the viewport', () => {
+    // Midpoint of row 2 (0-based): gap+800+gap+800+gap+300
+    const scrollTop = gap + 800 + gap + 800 + gap + 100
+    const win = rowWindowForScroll({
+      scrollTop,
+      clientHeight: 400,
+      rowHeights: heights,
+      gap,
+      scale: 1,
+      buffer: 1,
+    })
+    expect(win.from).toBe(1)
+    expect(win.to).toBe(3)
   })
 })

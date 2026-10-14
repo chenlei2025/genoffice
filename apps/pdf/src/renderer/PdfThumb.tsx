@@ -35,10 +35,10 @@ function releaseCanvasPixels(canvas: HTMLCanvasElement): void {
   canvas.height = 0
 }
 
-/** Thumbnail: rendered once per (doc, page, rotation, raster width) while visible.
- *  Offscreen thumbnails release their canvas allocation and raster again when
- *  shown. rasterW only changes when a sidebar drag ends, so a resize re-rasters
- *  each visible thumb once; while dragging the canvas just CSS-stretches. */
+/** Thumbnail: rendered once per (doc, page, rotation, raster width) when visible.
+ *  Keeps the last bitmap while offscreen (thumbs are small) so scroll / parent
+ *  re-renders do not flash. Renders into an offscreen canvas and swaps in only
+ *  when ready. rasterW only changes when a sidebar drag ends. */
 export function PdfThumb({
   doc,
   pageNo,
@@ -58,21 +58,17 @@ export function PdfThumb({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    if (!visible) {
-      renderedRef.current = null
-      releaseCanvasPixels(canvas)
-      return
-    }
+    if (!visible) return
     const rendered = renderedRef.current
     if (
       rendered?.doc === doc &&
       rendered.pageNo === pageNo &&
       rendered.rotationDelta === rotationDelta &&
-      rendered.rasterW === rasterW
+      rendered.rasterW === rasterW &&
+      canvas.width > 0
     ) {
       return
     }
-    renderedRef.current = null
     let disposed = false
     let renderTask: RenderTaskHandle | null = null
     const previousRenderSettled = renderSettledRef.current
@@ -88,15 +84,26 @@ export function PdfThumb({
         const scale = rasterW / page.getViewport({ scale: 1, rotation }).width
         const viewport = page.getViewport({ scale, rotation })
         const dpr = Math.min(window.devicePixelRatio || 1, 2)
-        canvas.width = Math.floor(viewport.width * dpr)
-        canvas.height = Math.floor(viewport.height * dpr)
+        const w = Math.floor(viewport.width * dpr)
+        const h = Math.floor(viewport.height * dpr)
+        // Paint offscreen, then copy — assigning canvas.width would clear the
+        // visible thumb and flash white until render finishes.
+        const offscreen = document.createElement('canvas')
+        offscreen.width = w
+        offscreen.height = h
         renderTask = page.render({
-          canvas,
+          canvas: offscreen,
           viewport,
           transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
         })
         await renderTask.promise
-        if (!disposed) renderedRef.current = { doc, pageNo, rotationDelta, rasterW }
+        if (disposed) return
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (ctx) ctx.drawImage(offscreen, 0, 0)
+        releaseCanvasPixels(offscreen)
+        renderedRef.current = { doc, pageNo, rotationDelta, rasterW }
       } catch {
         if (!disposed) renderedRef.current = null
       } finally {

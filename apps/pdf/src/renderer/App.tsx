@@ -64,6 +64,7 @@ import {
   captureViewState,
   captureZoomAnchor,
   loadViewState,
+  rowWindowForScroll,
   saveViewState,
   zoomAnchorY,
 } from './view-state'
@@ -145,8 +146,12 @@ import {
   MAX_SCALE,
   PAGE_GAP,
   SCROLL_PAD,
-  SIDEBAR_W_KEY,
+  ROW_WINDOW_THRESHOLD,
+  ROW_WINDOW_BUFFER,
+  THUMB_WINDOW_THRESHOLD,
+  THUMB_WINDOW_BUFFER,
   SIDEBAR_CHROME,
+  SIDEBAR_W_KEY,
   clampSidebarW,
   loadSidebarW,
   DOC_OPTS,
@@ -438,6 +443,7 @@ export default function App() {
       pointer events, so containment must read the just-set box synchronously */
   const lineHoverRef = useRef<LineHover | null>(null)
   const clearLineHover = () => {
+    if (!lineHoverRef.current && !lineHoverAnchor.current) return
     lineHoverAnchor.current = null
     lineHoverRef.current = null
     setLineHover(null)
@@ -921,25 +927,90 @@ export default function App() {
     [pageGeom],
   )
 
+  // Tight margin: windowing already keeps neighbors mounted; IO only gates overlays.
   const { visible: visibleRows, setItemRef: setRowRef } = useVisibleSet(
     scrollRef,
     rows.length,
-    '800px 0px',
+    '120px 0px',
     status === 'ready',
   )
   const { visible: visibleThumbs, setItemRef: setThumbRef } = useVisibleSet(
     thumbsRef,
     pageCount,
-    '400px 0px',
+    '200px 0px',
     status === 'ready' && sidebar === 'thumbs',
   )
+  /** Long docs: only mount rows near the viewport (spacers preserve scroll height) */
+  const [rowWindow, setRowWindow] = useState({ from: 0, to: 12, topPad: 0, bottomPad: 0 })
+  const windowRows = rows.length > ROW_WINDOW_THRESHOLD
+  const [thumbWindow, setThumbWindow] = useState({ from: 0, to: 24, topPad: 0, bottomPad: 0 })
+  const windowThumbs = pageCount > THUMB_WINDOW_THRESHOLD
+  const thumbStrideApprox = useMemo(() => {
+    const sample = visList[0]
+    if (sample === undefined) return 120
+    const size = dispSize(sample)
+    const boxH = thumbRasterW * (size.height / Math.max(size.width, 1))
+    return boxH + 28 // number label + padding
+  }, [visList, dispSize, thumbRasterW])
 
-  // Keep the current page's thumbnail in view as the main viewport drives currentPage
+  const syncThumbWindow = useCallback(() => {
+    const el = thumbsRef.current
+    if (!el || pageCount === 0) return
+    if (!windowThumbs) {
+      setThumbWindow((prev) =>
+        prev.from === 0 && prev.to === pageCount - 1 && prev.topPad === 0 && prev.bottomPad === 0
+          ? prev
+          : { from: 0, to: pageCount - 1, topPad: 0, bottomPad: 0 },
+      )
+      return
+    }
+    const stride = Math.max(48, thumbStrideApprox)
+    const first = Math.max(0, Math.floor(el.scrollTop / stride) - THUMB_WINDOW_BUFFER)
+    const last = Math.min(
+      pageCount - 1,
+      Math.ceil((el.scrollTop + el.clientHeight) / stride) + THUMB_WINDOW_BUFFER,
+    )
+    const topPad = first * stride
+    const bottomPad = Math.max(0, pageCount - last - 1) * stride
+    setThumbWindow((prev) =>
+      prev.from === first &&
+      prev.to === last &&
+      prev.topPad === topPad &&
+      prev.bottomPad === bottomPad
+        ? prev
+        : { from: first, to: last, topPad, bottomPad },
+    )
+  }, [pageCount, windowThumbs, thumbStrideApprox])
+
+  // Ensure the windowed thumb list contains the current page, then scroll it into view.
+  useLayoutEffect(() => {
+    if (sidebar !== 'thumbs' || !windowThumbs || pageCount === 0) return
+    const stride = Math.max(48, thumbStrideApprox)
+    const idx = currentPage - 1
+    setThumbWindow((prev) => {
+      if (idx >= prev.from && idx <= prev.to) return prev
+      const first = Math.max(0, idx - THUMB_WINDOW_BUFFER)
+      const last = Math.min(pageCount - 1, idx + THUMB_WINDOW_BUFFER)
+      return {
+        from: first,
+        to: last,
+        topPad: first * stride,
+        bottomPad: Math.max(0, pageCount - last - 1) * stride,
+      }
+    })
+  }, [currentPage, sidebar, windowThumbs, pageCount, thumbStrideApprox])
+
   useEffect(() => {
     if (sidebar !== 'thumbs') return
-    const thumbEl = thumbsRef.current?.querySelector<HTMLElement>(`[data-idx="${currentPage - 1}"]`)
-    thumbEl?.scrollIntoView({ block: 'nearest' })
-  }, [currentPage, sidebar])
+    const root = thumbsRef.current
+    const thumbEl = root?.querySelector<HTMLElement>(`[data-idx="${currentPage - 1}"]`)
+    if (!root || !thumbEl) return
+    const rootRect = root.getBoundingClientRect()
+    const thumbRect = thumbEl.getBoundingClientRect()
+    if (thumbRect.bottom > rootRect.bottom || thumbRect.top < rootRect.top) {
+      thumbEl.scrollIntoView({ block: 'nearest' })
+    }
+  }, [currentPage, sidebar, thumbWindow])
 
   // During a normal post-save reload, retain pending visual overlays until every
   // currently rendered page has swapped to the new document bitmap. Resolving the
@@ -1027,28 +1098,94 @@ export default function App() {
         const formFeatures = documentFormFeatures(documentInfo, bytes)
         setFormHasXfa(formFeatures.hasXfa)
         setDocumentEncrypted(formFeatures.encrypted)
-        for (let i = 1; i <= loaded.numPages; i++) {
+        /// Large docs: probe page 1, placeholder the rest, refine in background so
+        /// the UI is not stuck on "loading" for hundreds of sequential getPage calls.
+        const pageCount = loaded.numPages
+        all.length = pageCount
+        rots.length = pageCount
+        origins.length = pageCount
+        userUnits.length = pageCount
+        const probePage = async (i: number) => {
           const page = await loaded.getPage(i)
           // Unrotated size; display size is derived by geom from the total rotation
           const vp = page.getViewport({ scale: 1, rotation: 0 })
-          all.push({ width: vp.width, height: vp.height })
-          rots.push(page.rotate ?? 0)
-          origins.push([page.view[0]!, page.view[1]!])
-          userUnits.push(page.userUnit ?? 1)
+          all[i - 1] = { width: vp.width, height: vp.height }
+          rots[i - 1] = page.rotate ?? 0
+          origins[i - 1] = [page.view[0]!, page.view[1]!]
+          userUnits[i - 1] = page.userUnit ?? 1
+        }
+        await probePage(1)
+        for (let i = 1; i < pageCount; i++) {
+          all[i] = { ...all[0]! }
+          rots[i] = rots[0]!
+          origins[i] = origins[0]!
+          userUnits[i] = userUnits[0]!
+        }
+        /// Adopt early so background refine / form catalog can detect stale loads.
+        outlineDocRef.current = loaded
+        if (pageCount > 1) {
+          const refineDoc = loaded
+          void (async () => {
+            let nextPage = 2
+            const concurrency = Math.min(16, pageCount - 1)
+            let changed = false
+            await Promise.all(
+              Array.from({ length: concurrency }, async () => {
+                for (;;) {
+                  const i = nextPage++
+                  if (i > pageCount) return
+                  if (outlineDocRef.current !== refineDoc) return
+                  const page = await refineDoc.getPage(i)
+                  const vp = page.getViewport({ scale: 1, rotation: 0 })
+                  const size = { width: vp.width, height: vp.height }
+                  const rot = page.rotate ?? 0
+                  const origin: [number, number] = [page.view[0]!, page.view[1]!]
+                  const uu = page.userUnit ?? 1
+                  const prev = all[i - 1]!
+                  if (
+                    prev.width !== size.width ||
+                    prev.height !== size.height ||
+                    rots[i - 1] !== rot ||
+                    origins[i - 1]![0] !== origin[0] ||
+                    origins[i - 1]![1] !== origin[1] ||
+                    userUnits[i - 1] !== uu
+                  ) {
+                    changed = true
+                  }
+                  all[i - 1] = size
+                  rots[i - 1] = rot
+                  origins[i - 1] = origin
+                  userUnits[i - 1] = uu
+                }
+              }),
+            )
+            if (outlineDocRef.current !== refineDoc || !changed) return
+            setSizes([...all])
+            setPageOrigins([...origins])
+            setPageUserUnits([...userUnits])
+            setBaseRots([...rots])
+          })()
         }
       } catch (err) {
         // getMetadata/page probing failed after the document resolved but before
         // setDoc adopted it: destroy the half-open document (pdfjs-dist 6.x
         // removed PDFDocumentProxy.destroy(); go through the loading task) and
         // keep the previous document on screen, then surface the error
+        if (outlineDocRef.current === loaded) outlineDocRef.current = previous
         void loaded.loadingTask.destroy()
         throw err
       }
-      try {
-        setFormCatalog(await buildFormCatalog(loaded))
-      } catch {
-        setFormCatalog({ widgets: [], fields: new Map(), byPage: new Map() })
-      }
+      /// Form widgets walk every page — do not block first paint on large docs.
+      setFormCatalog({ widgets: [], fields: new Map(), byPage: new Map() })
+      void buildFormCatalog(loaded)
+        .then((catalog) => {
+          if (outlineDocRef.current === loaded) setFormCatalog(catalog)
+        })
+        .catch(() => {
+          if (outlineDocRef.current === loaded) {
+            setFormCatalog({ widgets: [], fields: new Map(), byPage: new Map() })
+          }
+        })
       try {
         setSavedStaticFormFills(await window.pdfApi.listStaticFormFills(path))
       } catch {
@@ -1350,7 +1487,9 @@ export default function App() {
   const rowTop = useCallback(
     (rowIdx: number) => {
       let y = PAGE_GAP
-      for (let i = 0; i < rowIdx; i++) y += rowSize(rows[i]!).height * scale + PAGE_GAP
+      // Floor to match .pdf-page CSS height and window spacers (avoids scroll jumps / flicker)
+      for (let i = 0; i < rowIdx; i++)
+        y += Math.floor(rowSize(rows[i]!).height * scale) + PAGE_GAP
       return y
     },
     [rows, rowSize, scale],
@@ -1452,10 +1591,10 @@ export default function App() {
     return () => ro.disconnect()
   }, [status, recomputeFit])
 
-  /** Apply the restored reading position once the doc is ready. Positions via the
-   *  row's DOM offset two frames later: the initial fit recompute (effect above)
-   *  and its anchored scroll write (layout effect on scale) must land first, or
-   *  they would clobber this write. */
+  /** Apply the restored reading position once the doc is ready. Uses layout math
+   *  (not DOM offsets) so windowed rows that are not mounted yet still restore.
+   *  Two frames later: the initial fit recompute and its anchored scroll write
+   *  must land first, or they would clobber this write. */
   useEffect(() => {
     if (status !== 'ready' || rows.length === 0) return
     const savedView = pendingViewRestoreRef.current
@@ -1473,14 +1612,12 @@ export default function App() {
         // otherwise let a debounced save overwrite the stored spot with the top
         pendingViewRestoreRef.current = null
         const el = scrollRef.current
-        const rowEl = el?.querySelector<HTMLElement>(`.pdf-row[data-idx="${rowIdx}"]`)
-        if (!el || !rowEl) return
-        const rowTopPx =
-          rowEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
-        el.scrollTop = rowTopPx + savedView.frac * rowEl.offsetHeight
+        if (!el || rowIdx < 0 || rowIdx >= rows.length) return
+        const h = Math.floor(rowSize(rows[rowIdx]!).height * scale)
+        el.scrollTop = rowTop(rowIdx) + savedView.frac * h
       }),
     )
-  }, [status, rows, pageCount, rowOfVis])
+  }, [status, rows, pageCount, rowOfVis, rowTop, rowSize, scale])
 
   /** Persist the reading position (debounced) so reopening the file returns here.
    *  Listens to scroll directly — currentPage only changes per page, not per pixel. */
@@ -1524,19 +1661,78 @@ export default function App() {
   /** Page-top offset of a visible position (used for search positioning) */
   const pageTop = useCallback((visIdx: number) => rowTop(rowOfVis(visIdx)), [rowTop, rowOfVis])
 
-  const handleScroll = useCallback(() => {
+  const syncRowWindow = useCallback(() => {
     const el = scrollRef.current
     if (!el || rows.length === 0) return
-    const anchor = el.scrollTop + el.clientHeight * 0.4
-    let rowIdx = 0
-    for (let i = 0; i < rows.length; i++) {
-      if (rowTop(i) <= anchor) rowIdx = i
-      else break
+    if (rows.length <= ROW_WINDOW_THRESHOLD) {
+      setRowWindow((prev) =>
+        prev.from === 0 && prev.to === rows.length - 1 && prev.topPad === 0 && prev.bottomPad === 0
+          ? prev
+          : { from: 0, to: rows.length - 1, topPad: 0, bottomPad: 0 },
+      )
+      return
     }
-    const page = visList.indexOf(rows[rowIdx]![0]!) + 1
-    setCurrentPage(page)
-    setPageInput(String(page))
-  }, [rows, rowTop, visList])
+    const { scale: s, rowHeights: heights } = layoutRef.current
+    const next = rowWindowForScroll({
+      scrollTop: el.scrollTop,
+      clientHeight: el.clientHeight,
+      rowHeights: heights,
+      gap: PAGE_GAP,
+      scale: s,
+      buffer: ROW_WINDOW_BUFFER,
+    })
+    setRowWindow((prev) =>
+      prev.from === next.from &&
+      prev.to === next.to &&
+      prev.topPad === next.topPad &&
+      prev.bottomPad === next.bottomPad
+        ? prev
+        : next,
+    )
+  }, [rows.length])
+
+  // Prefix tops at the committed scale — O(log n) page lookup while scrolling
+  const rowTopPrefixRef = useRef<number[]>([])
+  useLayoutEffect(() => {
+    const { scale: s, rowHeights: heights } = layoutRef.current
+    const tops: number[] = new Array(heights.length)
+    let y = PAGE_GAP
+    for (let i = 0; i < heights.length; i++) {
+      tops[i] = y
+      y += Math.floor(heights[i]! * s) + PAGE_GAP
+    }
+    rowTopPrefixRef.current = tops
+  }, [scale, rowHeights])
+
+  const scrollRafRef = useRef(0)
+  const handleScroll = useCallback(() => {
+    if (scrollRafRef.current) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0
+      const el = scrollRef.current
+      if (!el || rows.length === 0) return
+      syncRowWindow()
+      const tops = rowTopPrefixRef.current
+      if (tops.length === 0) return
+      const anchor = el.scrollTop + el.clientHeight * 0.4
+      let lo = 0
+      let hi = tops.length - 1
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1
+        if (tops[mid]! <= anchor) lo = mid
+        else hi = mid - 1
+      }
+      const page = visList.indexOf(rows[lo]![0]!) + 1
+      setCurrentPage((prev) => (prev === page ? prev : page))
+      setPageInput((prev) => (prev === String(page) ? prev : String(page)))
+    })
+  }, [rows, visList, syncRowWindow])
+
+  // Keep the mount window aligned after fit/zoom/layout changes (scroll may not fire)
+  useLayoutEffect(() => {
+    if (status !== 'ready') return
+    syncRowWindow()
+  }, [status, scale, rowHeights, rows.length, syncRowWindow])
 
   const scrollToPage = (n: number) => {
     const el = scrollRef.current
@@ -6950,8 +7146,20 @@ export default function App() {
               </div>
             )}
             {sidebar === 'thumbs' && (
-              <div ref={thumbsRef} className="pdf-thumbs" style={{ width: sidebarW }}>
-                {visList.map((origIdx, v) => {
+              <div
+                ref={thumbsRef}
+                className="pdf-thumbs"
+                style={{ width: sidebarW }}
+                onScroll={() => syncThumbWindow()}
+              >
+                {windowThumbs && thumbWindow.topPad > 0 && (
+                  <div style={{ height: thumbWindow.topPad }} aria-hidden />
+                )}
+                {(windowThumbs
+                  ? visList.slice(thumbWindow.from, thumbWindow.to + 1)
+                  : visList
+                ).map((origIdx, i) => {
+                  const v = windowThumbs ? thumbWindow.from + i : i
                   const size = dispSize(origIdx)
                   return (
                     <div
@@ -7064,6 +7272,9 @@ export default function App() {
                     </div>
                   )
                 })}
+                {windowThumbs && thumbWindow.bottomPad > 0 && (
+                  <div style={{ height: thumbWindow.bottomPad }} aria-hidden />
+                )}
               </div>
             )}
             {(sidebar === 'thumbs' || (sidebar === 'outline' && !!outline)) && (
@@ -7074,9 +7285,9 @@ export default function App() {
               className={`pdf-scroll${drawTool ? ' pdf-drawing' : ''}${nightMode ? ' pdf-night' : ''}`}
               onScroll={() => {
                 handleScroll()
-                setSelPopup(null)
-                setAskPop(null)
-                setSelected(null)
+                setSelPopup((p) => (p ? null : p))
+                setAskPop((p) => (p ? null : p))
+                setSelected((s) => (s ? null : s))
                 clearLineHover()
                 clearBlockHover()
               }}
@@ -7100,8 +7311,15 @@ export default function App() {
                 }
               }}
             >
-              {rows.map((row, r) => {
-                const rowVisible = visibleRows.has(r)
+              {windowRows && rowWindow.topPad > 0 && (
+                <div className="pdf-row-spacer" style={{ height: rowWindow.topPad }} aria-hidden />
+              )}
+              {(windowRows ? rows.slice(rowWindow.from, rowWindow.to + 1) : rows).map((row, i) => {
+                const r = windowRows ? rowWindow.from + i : i
+                // Windowed rows paint as soon as mounted; heavy overlays wait for IO so the
+                // ±buffer pages don't build note/text/form trees while scrolling.
+                const rowVisible = windowRows || visibleRows.has(r)
+                const overlaysOn = visibleRows.has(r)
                 // Comments margin geometry: pin anchors relative to the margin column,
                 // which sits one flex gap right of the row's pages
                 const rowWidths = row.map((i) => Math.floor(dispSize(i).width * scale))
@@ -7120,7 +7338,7 @@ export default function App() {
                   ]
                 }
                 const marginThreads: NoteMarginThread[] =
-                  noteMarginOn && rowVisible
+                  noteMarginOn && overlaysOn
                     ? row.flatMap((origIdx, i) =>
                         noteThreadsOn(origIdx).map((root) => {
                           const [pinX, pinY] = pinAnchor(i, pageGeom(origIdx), root.at)
@@ -7260,7 +7478,7 @@ export default function App() {
                             border grips — dragging them moves the whole block. */}
                           {editTextMode &&
                             !readOnly &&
-                            rowVisible &&
+                            overlaysOn &&
                             (pageBlocks.get(origIdx) ?? []).map((b, i) => {
                               const drawRect = blockDrawRect(origIdx, b)
                               const box = pdfRectToCss(geom, drawRect, scale)
@@ -7387,7 +7605,7 @@ export default function App() {
                           {editTextMode && !readOnly && lineHover?.origIdx === origIdx && (
                             <div className="pdf-textline-hover" style={lineHover.box} />
                           )}
-                          {rowVisible && (
+                          {overlaysOn && (
                             <>
                               {pendingTextInsert && textInsertPointer?.pageIndex === origIdx && (
                                 <div
@@ -8270,6 +8488,9 @@ export default function App() {
                   </div>
                 )
               })}
+              {windowRows && rowWindow.bottomPad > 0 && (
+                <div className="pdf-row-spacer" style={{ height: rowWindow.bottomPad }} aria-hidden />
+              )}
             </div>
             {searchOpen && (
               <div className="pdf-search-bar">

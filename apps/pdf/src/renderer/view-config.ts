@@ -8,6 +8,15 @@ export const MIN_SCALE = ZOOM_STEPS[0]
 export const MAX_SCALE = ZOOM_STEPS[ZOOM_STEPS.length - 1]
 export const PAGE_GAP = 16
 export const SCROLL_PAD = 24
+/** Above this many rows, only mount a viewport window (+ buffer) into the scroll list */
+export const ROW_WINDOW_THRESHOLD = 1
+/** Extra rows kept mounted past the viewport so bitmaps are ready before they scroll in */
+export const ROW_WINDOW_BUFFER = 1
+/** Thumbnail list windowing for long docs */
+export const THUMB_WINDOW_THRESHOLD = 40
+export const THUMB_WINDOW_BUFFER = 6
+/** Cap device-pixel ratio while scrolling many pages (memory / upload to GPU) */
+export const PAGE_RENDER_DPR_CAP = 1.5
 // ── Sidebar (thumbnails / outline) width: drag the divider to resize; persisted ──
 export const SIDEBAR_W_KEY = 'genoffice-pdf-sidebar-width'
 export const SIDEBAR_W_DEFAULT = 150

@@ -157,3 +157,48 @@ export function zoomAnchorY(
     top += rowHeights[i]! * scale + gap
   return top + anchor.content * scale + anchor.fixed
 }
+
+/** Mount only rows near the viewport for long documents (spacers keep scroll height). */
+export function rowWindowForScroll(args: {
+  scrollTop: number
+  clientHeight: number
+  rowHeights: number[]
+  gap: number
+  scale: number
+  buffer: number
+}): { from: number; to: number; topPad: number; bottomPad: number } {
+  const { scrollTop, clientHeight, rowHeights, gap, scale, buffer } = args
+  const n = rowHeights.length
+  if (n === 0) return { from: 0, to: -1, topPad: 0, bottomPad: 0 }
+  const viewBottom = scrollTop + clientHeight
+  // Match .pdf-page CSS heights (Math.floor(size * scale)) so spacers don't drift
+  const px = (i: number) => Math.floor(rowHeights[i]! * scale)
+  let y = gap
+  let from = 0
+  let to = 0
+  for (let i = 0; i < n; i++) {
+    const h = px(i)
+    if (y + h >= scrollTop) {
+      from = i
+      break
+    }
+    y += h + gap
+    from = i
+  }
+  y = gap
+  for (let i = 0; i < n; i++) {
+    const h = px(i)
+    if (y <= viewBottom) to = i
+    else break
+    y += h + gap
+  }
+  from = Math.max(0, from - buffer)
+  to = Math.min(n - 1, to + buffer)
+  let topPad = 0
+  for (let i = 0; i < from; i++) topPad += gap + px(i)
+  let bottomPad = 0
+  for (let i = to + 1; i < n; i++) bottomPad += gap + px(i)
+  // Final document margin-bottom (last .pdf-row is not :last-child when a spacer follows)
+  if (to < n - 1) bottomPad += gap
+  return { from, to, topPad, bottomPad }
+}
