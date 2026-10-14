@@ -3,7 +3,7 @@
 /// panel does not open as a second window.
 
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -2291,10 +2291,12 @@ async function readPdfPageCount(pdfPath: string): Promise<number> {
 /// Word PDF preview document loaded in the print dialog iframe.
 async function writePdfJsPreviewHtml(workDir: string, pdfPath: string): Promise<string> {
   const htmlPath = join(workDir, 'pdf-preview.html')
-  /// readFile+writeFile (not copyFile): assets live inside app.asar.
+  const localPdf = join(workDir, 'preview.pdf')
+  /// readFile+writeFile for pdf.js assets (they live inside app.asar).
   await writeFile(join(workDir, 'pdf.min.mjs'), await readFile(pdfJsAsset))
   await writeFile(join(workDir, 'pdf.worker.min.mjs'), await readFile(pdfWorkerAsset))
-  const pdfBase64 = (await readFile(pdfPath)).toString('base64')
+  /// Load via relative URL — embedding multi‑MB PDFs as base64 blocked the dialog.
+  if (pdfPath !== localPdf) await copyFile(pdfPath, localPdf)
   await writeFile(
     htmlPath,
     `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -2388,13 +2390,13 @@ html, body {
   border-color: AccentColor;
   color: Canvas;
 }
-.err {
+.err, .loading {
   margin: 24px;
   color: color-mix(in srgb, CanvasText 70%, transparent);
   font: 13px/1.4 system-ui, sans-serif;
 }
 </style></head><body>
-<div id="scroll"></div>
+<div id="scroll"><p class="loading">…</p></div>
 <script type="module">
 import * as pdfjs from './pdf.min.mjs';
 pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
@@ -2406,7 +2408,36 @@ let userZoom = 1;
 let fitRaf = 0;
 let selectedPages = null;
 let resolveReady;
+let readySettled = false;
 window.__pdfReady = new Promise((resolve) => { resolveReady = resolve; });
+const markReady = () => {
+  if (readySettled) return;
+  readySettled = true;
+  resolveReady();
+};
+const showPendingOrFallback = () => {
+  if (pendingLayout) {
+    applyPrintLayoutNow(pendingLayout);
+  } else if (pageNodes.length > 0) {
+    const first = pageNodes[0];
+    applyPrintLayoutNow({
+      pageW: first.pageWIn,
+      pageH: first.pageHIn,
+      top: 0, right: 0, bottom: 0, left: 0,
+      scale: 1,
+      fitMode: 'scale',
+      align: 'center',
+      justify: 'center',
+      reverseOrientation: false,
+      flipHorizontal: false,
+      pageBorder: 'none',
+      pagesPerSheet: 1,
+      layoutDirection: 'ltr-ttb',
+      nupCols: 1,
+      nupRows: 1,
+    });
+  }
+};
 const nupCellIndex = (fillIndex, cols, rows, direction) => {
   const total = cols * rows;
   if (fillIndex < 0 || fillIndex >= total || cols < 1 || rows < 1) return fillIndex;
@@ -2646,13 +2677,12 @@ const waitForPane = () => new Promise((resolve) => {
 });
 try {
   await waitForPane();
-  const bin = atob('${pdfBase64}');
-  const data = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
-  const doc = await pdfjs.getDocument({ data, useWasm: false }).promise;
+  const doc = await pdfjs.getDocument({ url: './preview.pdf', useWasm: false }).promise;
   const total = doc.numPages;
+  scroll.replaceChildren();
   // Rasterize once; Layout pane (N-up / flip / border) rearranges via
-  // __applyPrintLayout without re-rendering PDF pages.
+  // __applyPrintLayout without re-rendering PDF pages. Unblock the parent
+  // after the first page so the dialog is not stuck waiting on long jobs.
   const renderScale = 1.5;
   for (let i = 1; i <= total; i++) {
     const page = await doc.getPage(i);
@@ -2674,6 +2704,8 @@ try {
     const ctx = canvas.getContext('2d');
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     page.cleanup();
+    showPendingOrFallback();
+    if (i === 1) markReady();
   }
   new ResizeObserver(scheduleFit).observe(scroll);
   window.addEventListener('resize', scheduleFit);
@@ -2689,29 +2721,8 @@ try {
   p.textContent = String(err && err.message ? err.message : err);
   scroll.appendChild(p);
 } finally {
-  if (pendingLayout) {
-    applyPrintLayoutNow(pendingLayout);
-  } else if (pageNodes.length > 0) {
-    // Until the sidebar publishes layout, show pages fitted to the pane.
-    const first = pageNodes[0];
-    applyPrintLayoutNow({
-      pageW: first.pageWIn,
-      pageH: first.pageHIn,
-      top: 0, right: 0, bottom: 0, left: 0,
-      scale: 1,
-      fitMode: 'scale',
-      align: 'center',
-      justify: 'center',
-      reverseOrientation: false,
-      flipHorizontal: false,
-      pageBorder: 'none',
-      pagesPerSheet: 1,
-      layoutDirection: 'ltr-ttb',
-      nupCols: 1,
-      nupRows: 1,
-    });
-  }
-  resolveReady();
+  showPendingOrFallback();
+  markReady();
 }
 </script>
 </body></html>`,
@@ -3006,7 +3017,13 @@ export async function openCombinedPrintDialog(args: {
           while (Date.now() < deadline) {
             const w = frame.contentWindow
             if (w && typeof w.__applyPrintLayout === 'function') {
-              if (w.__pdfReady) await w.__pdfReady
+              // First page ready is enough — do not wait for every page to rasterize.
+              if (w.__pdfReady) {
+                await Promise.race([
+                  w.__pdfReady,
+                  new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now()))),
+                ])
+              }
               w.__applyPrintLayout(${patchJson})
               if (typeof w.__fitPreview === 'function') w.__fitPreview()
               return true
@@ -3152,8 +3169,14 @@ export async function openCombinedPrintDialog(args: {
           'utf8',
         )
         await win.loadFile(panelPath)
+        /// Show immediately — document PDF previews rasterize in the iframe and
+        /// must not block the dialog behind an invisible window.
+        if (!win.isDestroyed()) {
+          win.show()
+          win.focus()
+        }
         await applyPreviewLayout(liveSettings)
-        if (!documentMode) {
+        if (!documentMode && !win.isDestroyed()) {
           pageCount = (await previewPageInfo(win)).pageCount
           await win.webContents.executeJavaScript(
             `(() => {
@@ -3163,10 +3186,6 @@ export async function openCombinedPrintDialog(args: {
               if (from) from.max = String(${pageCount})
             })()`,
           )
-        }
-        if (!win.isDestroyed()) {
-          win.show()
-          win.focus()
         }
       } catch (error: unknown) {
         finish({ error: error instanceof Error ? error.message : String(error) })

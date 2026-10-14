@@ -34,7 +34,6 @@ import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { ImageExportSessions } from './image-export'
 import { printMarkdownPdf } from './print-pdf'
-import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { atomicWriteFile } from './atomic-write'
 import {
   copyImageIntoOwnedAssets,
@@ -981,6 +980,9 @@ function registerMarkdownIpc(): void {
       const owner = BrowserWindow.fromWebContents(e.sender)
       try {
         const pdf = await printMarkdownPdf(request.html)
+        const { openDocumentPrintDialogFromPdf } = await import(
+          '../../../sheets/src/main/print-dialog'
+        )
         return await openDocumentPrintDialogFromPdf({
           parent: owner && !owner.isDestroyed() ? owner : null,
           pdf,

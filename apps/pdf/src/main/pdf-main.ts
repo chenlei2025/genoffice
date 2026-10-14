@@ -30,7 +30,6 @@ import {
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
-import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { buildExportImagePaths, hasValidExportPageNumbers } from './export-images'
 import type {
   ExportImagesRequest,
@@ -933,6 +932,9 @@ function registerPdfIpc(): void {
     const owner = BrowserWindow.fromWebContents(e.sender)
     try {
       const pdf = await readFile(path)
+      const { openDocumentPrintDialogFromPdf } = await import(
+        '../../../sheets/src/main/print-dialog'
+      )
       return await openDocumentPrintDialogFromPdf({
         parent: owner && !owner.isDestroyed() ? owner : null,
         pdf,

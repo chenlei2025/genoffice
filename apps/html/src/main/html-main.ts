@@ -44,7 +44,6 @@ import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
-import { openDocumentPrintDialogFromPdf } from '../../../sheets/src/main/print-dialog'
 import { atomicWriteFile } from './atomic-write'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
@@ -1682,6 +1681,9 @@ function registerHtmlIpc(): void {
         const docPath = savePathByWc.get(e.sender.id)
         const pdf = await renderPrintPdf(request.html, docPath, workDir)
         const name = exportFileName(request.suggestedName)
+        const { openDocumentPrintDialogFromPdf } = await import(
+          '../../../sheets/src/main/print-dialog'
+        )
         return await openDocumentPrintDialogFromPdf({
           parent: owner && !owner.isDestroyed() ? owner : null,
           pdf,
